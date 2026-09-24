@@ -60,7 +60,7 @@ SHA256：`123127C691A7D36C47B242E25AD4FC5504F37098958149681F787B01CB7AF114`
 - 只有在你主动选择云端识别或翻译服务时，相关内容才会发送给对应服务商。
 - 请只下载和处理你有权访问的内容。
 
-阅读完整的[隐私政策](https://links2008.github.io/-/)，或通过 [GitHub Issues](https://github.com/Links2008/-/issues) 提交问题。
+阅读完整的[隐私政策](https://links2008.github.io/Jiying/privacy.html)，或通过 [GitHub Issues](https://github.com/Links2008/Jiying/issues) 提交问题。
 
 ---
 

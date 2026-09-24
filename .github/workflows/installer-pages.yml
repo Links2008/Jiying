@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [.github/workflows/installer-pages.yml, privacy.html]
+    paths: [.github/workflows/installer-pages.yml, index.html, privacy.html]
 permissions:
   contents: read
   pages: write
@@ -20,17 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - name: Download and verify installer
+      - name: Prepare site
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p site/1.0.0
-          cp privacy.html site/privacy.html
-          curl --fail --location --retry 3 --output site/1.0.0/Jiying-Setup-1.0.0-x64.exe https://github.com/Links2008/-/releases/download/v2/Jiying-Setup-1.0.0-x64.exe
-          curl --fail --location --retry 3 --output site/1.0.0/Jiying-1.0.0.0-x64.msix https://github.com/Links2008/-/releases/download/v2/Jiying-1.0.0.0-x64.msix
-          echo '7ff290a93254b3da2f59b84e78b7d19f9f6e3cce0493d7c75eeb3e6559af98eb  site/1.0.0/Jiying-Setup-1.0.0-x64.exe' | sha256sum --check
-          echo '17e623dedad8704d5e281fce200af4b1c4236186096cbaa1a01c367e3d223798  site/1.0.0/Jiying-1.0.0.0-x64.msix' | sha256sum --check
-          printf '%s\n' '<!doctype html><meta charset="utf-8"><title>Jiying downloads</title><a href="1.0.0/Jiying-Setup-1.0.0-x64.exe">Jiying 1.0.0 EXE</a><br><a href="1.0.0/Jiying-1.0.0.0-x64.msix">Jiying 1.0.0 MSIX</a><br><a href="privacy.html">Privacy policy</a>' > site/index.html
+          mkdir -p site
+          cp index.html privacy.html site/
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site
