@@ -10,7 +10,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/许可-MIT-22a06b?style=flat-square" alt="MIT License"></a>
   </p>
   <p>
-    <a href="https://github.com/Links2008/Jiying/releases/download/v1.1.9.0/Jiying-Native-1.1.9.0-x64-portable.zip"><strong>下载最新版</strong></a>
+    <a href="https://github.com/Links2008/Jiying/releases/download/v1.1.10.0/Jiying-Native-1.1.10.0-x64-portable.zip"><strong>下载最新版</strong></a>
     &nbsp;|&nbsp;
     <a href="https://github.com/Links2008/Jiying/releases">版本记录</a>
     &nbsp;|&nbsp;
@@ -47,13 +47,13 @@
 
 ## 下载与使用
 
-1. 下载 [x64 便携版 ZIP](https://github.com/Links2008/Jiying/releases/download/v1.1.9.0/Jiying-Native-1.1.9.0-x64-portable.zip)，解压后运行 `Jiying.Native.exe`。
+1. 下载 [x64 便携版 ZIP](https://github.com/Links2008/Jiying/releases/download/v1.1.10.0/Jiying-Native-1.1.10.0-x64-portable.zip)，解压后运行 `Jiying.Native.exe`。
 2. 启动即影，将视频链接粘贴到解析框。
 3. 选择画质、格式和字幕选项，然后开始下载。
 
-当前版本：`1.1.9.0`。便携版 SHA256：`7011525FB24F13BAE8EABCB8E24A94603409EEAB654827B6574E298C22806861`。
+当前版本：`1.1.10.0`。便携版 SHA256：`B403DD78022E2B2C1FD7B7ABB293643D8836C32923CA139DB2DFA79E01E9D641`。
 
-[MSIX 包](https://github.com/Links2008/Jiying/releases/download/v1.1.9.0/Jiying-Native-1.1.9.0-x64.msix)用于 Microsoft Store 提交，SHA256：`0BEDE05CADF4D46D894CE3FBDF4B6EB183C0155BF505A5DD50A6A2C58F6D0F12`。GitHub 上的 MSIX 尚无受信任证书签名，直接安装可能出现 `0x800B010A`；商店审核通过后请从 [Microsoft Store](https://apps.microsoft.com/detail/9N2XR4X7CXPR) 安装。
+[MSIX 包](https://github.com/Links2008/Jiying/releases/download/v1.1.10.0/Jiying-Native-1.1.10.0-x64.msix)用于 Microsoft Store 提交，SHA256：`170902523F633A72934B486357C5AB9330A65B55D7C64198706977CFE87A3083`。GitHub 上的 MSIX 尚无受信任证书签名，直接安装可能出现 `0x800B010A`；商店审核通过后请从 [Microsoft Store](https://apps.microsoft.com/detail/9N2XR4X7CXPR) 安装。
 
 ## 隐私与使用说明
 
