@@ -5,8 +5,9 @@
   <p>把视频保存到本地，让字幕跨越语言。</p>
   <p>适用于 Windows 的视频下载、字幕识别与翻译工具。</p>
   <p>
-    <a href="https://apps.microsoft.com/detail/9N2XR4X7CXPR"><strong>从 Microsoft Store 下载</strong></a>
-    &nbsp;·&nbsp;
+    <a href="https://apps.microsoft.com/detail/9N2XR4X7CXPR"><img src="https://get.microsoft.com/images/zh-cn%20dark.svg" width="200" alt="从 Microsoft Store 下载即影"></a>
+  </p>
+  <p>
     <a href="https://github.com/Links2008/Jiying/releases">GitHub 版本与下载</a>
     &nbsp;·&nbsp;
     <a href="https://github.com/Links2008/Jiying/issues">问题反馈</a>
@@ -17,6 +18,15 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/许可-MIT-22a06b?style=flat-square" alt="MIT License"></a>
   </p>
 </div>
+
+## 为什么选择即影
+
+- **下载与字幕一起完成**：在同一个工具中下载视频、识别语音、翻译字幕，并导出字幕文件或带字幕的视频。
+- **画质选择清楚**：解析后选择网站实际提供的分辨率和格式，按需要保存视频。
+- **本地识别保护隐私**：使用本地语音模型时，音频识别在你的设备上完成；云端识别和翻译由你主动选择与配置。
+- **功能按需使用**：只下载视频时无需语音模型，也无需等待字幕处理；需要本地识别时再下载模型。
+- **任务方便管理**：查看下载进度，取消、重试或恢复未完成任务，方便继续之前的下载。
+- **商店安装省心**：通过 Microsoft Store 获取带商店签名的安装版本，并接收后续更新。
 
 <p align="center">
   <img src="assets/store-overview.jpg" width="100%" alt="即影界面概览">
@@ -85,4 +95,3 @@
 请只下载和处理你有权访问的内容。反馈问题时请勿公开 Cookie、API 密钥或其他登录信息。
 
 本仓库用于发布即影安装包、版本说明、隐私政策和问题反馈。
-
