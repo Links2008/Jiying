@@ -1,0 +1,5 @@
+# 开发、回归测试与引擎打包依赖
+-r requirements.txt
+pytest>=8.0
+httpx>=0.27
+pyinstaller>=6.0

@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VideoSubtitler · 视频下载与多语言字幕</title>
+<style>
+  /* 设计令牌：参考 OpenDesign（open-design.ai）公开设计体系 */
+  :root {
+    --bg-page: #fafafa; --bg-soft: #f5f5f5; --bg-divide: #f0f0f0;
+    --border: #d9d9d9; --border-strong: #bfbfbf;
+    --text-faint: #8c8c8c; --text-secondary: #595959;
+    --text-body: #434343; --text-strong: #262626;
+    --brand: #63fe13; --brand-hover: #83ff3b; --brand-press: #44d904;
+    --brand-soft: #f2ffe6; --brand-text: #218c00; --brand-deep: #146600;
+    --link: #1a74ff; --info: #3aa5f0; --success: #00aa54;
+    --warn: #ffba12; --error: #f04142;
+    --radius: 12px; --radius-sm: 8px;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --font: "Albert Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg-page); color: var(--text-body);
+         font-family: var(--font); font-size: 14px; line-height: 1.55; }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px 72px; }
+
+  /* ---- 顶栏 ---- */
+  .topbar { display: flex; align-items: baseline; gap: 12px;
+            padding: 22px 0 18px; border-bottom: 1px solid var(--bg-divide); }
+  .brand { font-size: 17px; font-weight: 650; color: var(--text-strong);
+           letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: 8px; }
+  .logo-dot { width: 10px; height: 10px; border-radius: 3px;
+              background: var(--brand); border: 1px solid var(--brand-press); }
+  .ver { font-size: 12px; color: var(--text-faint); font-weight: 400; }
+  .tagline { color: var(--text-secondary); font-size: 12.5px; }
+
+  /* ---- 分区标题 ---- */
+  h1, h2 { color: var(--text-strong); letter-spacing: -0.01em;
+           text-wrap: balance; margin: 0; }
+  h1 { font-size: 19px; } h2 { font-size: 16px; }
+  .section-head { display: flex; align-items: baseline; gap: 10px;
+                  margin: 34px 0 14px; }
+  .muted { color: var(--text-secondary); font-size: 12.5px; }
+
+  /* ---- 提交区：单层扁平容器，无嵌套卡片 ---- */
+  .submit { background: #fff; border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 20px; }
+  .field { margin-bottom: 14px; }
+  .field > label { display: block; font-size: 12.5px; color: var(--text-secondary);
+                   margin-bottom: 6px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  input[type=text], input[type=number], select {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text-strong); padding: 9px 12px; font-size: 14px;
+    font-family: var(--font); transition: border-color .15s var(--ease-out); }
+  input[type=text]:hover, input[type=number]:hover, select:hover
+    { border-color: var(--border-strong); }
+  input[type=text]::placeholder { color: var(--text-faint); }
+  input[type=text] { flex: 1; min-width: 220px; }
+  input[type=number] { width: 76px; }
+  select { padding-right: 8px; }
+
+  button { font-family: var(--font); font-size: 14px; border-radius: var(--radius-sm);
+           padding: 9px 16px; cursor: pointer; border: 1px solid transparent;
+           transition: background .15s var(--ease-out), border-color .15s var(--ease-out),
+                       transform .1s var(--ease-out), opacity .15s var(--ease-out); }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+  button.primary { background: var(--brand); color: var(--brand-deep);
+                   font-weight: 600; border-color: var(--brand-press); }
+  button.primary:hover:not(:disabled) { background: var(--brand-hover); }
+  button.primary:active:not(:disabled) { background: var(--brand-press); }
+  button.ghost { background: #fff; border-color: var(--border); color: var(--text-body); }
+  button.ghost:hover:not(:disabled) { border-color: var(--border-strong);
+                                      background: var(--bg-soft); }
+  :is(button, input, select, textarea, a):focus-visible {
+    outline: 2px solid var(--brand-text); outline-offset: 2px; }
+
+  .chip { padding: 6px 14px; font-size: 13px; background: #fff;
+          border: 1px solid var(--border); color: var(--text-secondary);
+          border-radius: 999px; }
+  .chip:hover:not(:disabled) { border-color: var(--border-strong);
+                               background: var(--bg-soft); }
+  .chip-on { background: var(--brand-soft); border-color: var(--brand);
+             color: var(--brand-deep); font-weight: 600; }
+  .chip-on:hover:not(:disabled) { background: var(--brand-soft); }
+
+  .hint { color: var(--text-secondary); font-size: 12px; margin-top: 10px; }
+  .inline-feedback { color: var(--text-secondary); font-size: 12.5px; }
+  .inline-feedback.err { color: var(--error); }
+
+  /* ---- 分辨率表 ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 10px; color: var(--text-secondary);
+       font-weight: 400; border-bottom: 1px solid var(--bg-divide); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--bg-divide);
+       color: var(--text-body); }
+  tbody tr { transition: background .12s var(--ease-out); }
+  tbody tr:hover { background: var(--bg-soft); }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---- 任务列表 ---- */
+  .status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+  .dot.run { background: var(--info); animation: pulse 1.6s var(--ease-out) infinite; }
+  .dot.ok { background: var(--success); }
+  .dot.err { background: var(--error); }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .bar { height: 6px; background: var(--bg-divide); border-radius: 3px;
+         overflow: hidden; min-width: 120px; }
+  .bar > i { display: block; height: 100%; width: 0;
+             background: var(--brand); border-radius: 3px;
+             transition: width .3s var(--ease-out); }
+  .pct { color: var(--text-secondary); font-size: 12px; margin-top: 4px;
+         font-variant-numeric: tabular-nums; }
+
+  .art a { color: var(--link); text-decoration: none; margin-right: 12px; }
+  .art a:hover { text-decoration: underline; }
+
+  /* ---- 字幕编辑对话框 ---- */
+  dialog { background: #fff; color: var(--text-body); border: 1px solid var(--border);
+           border-radius: var(--radius); width: min(720px, 92vw); padding: 20px;
+           box-shadow: 0 12px 40px rgba(0,0,0,.14); }
+  dialog::backdrop { background: rgba(38,38,38,.4); }
+  textarea { width: 100%; min-height: 240px; background: #fff;
+             border: 1px solid var(--border); border-radius: var(--radius-sm);
+             padding: 12px; color: var(--text-strong); font-family: var(--mono);
+             font-size: 13px; line-height: 1.6; }
+  textarea:hover { border-color: var(--border-strong); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: .01ms !important;
+                             animation-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <span class="brand"><span class="logo-dot"></span>VideoSubtitler <span class="ver">v0.1.0</span></span>
+    <span class="tagline">视频下载 · 语音识别 · 多语言字幕</span>
+  </header>
+
+  <div class="section-head">
+    <h1>新建任务</h1>
+    <span class="muted">粘贴链接，两步完成：先分析分辨率，再开始下载</span>
+  </div>
+
+  <section class="submit">
+    <div class="field">
+      <label for="url">视频链接</label>
+      <div class="row">
+        <input type="text" id="url" placeholder="B站 / YouTube / TikTok / 直链 mp4 均可">
+        <button class="primary" id="btnProbe" onclick="probe()">分析链接</button>
+      </div>
+      <div id="probeInfo" class="hint" style="margin-top:8px"></div>
+    </div>
+
+    <div id="formatsBox" style="display:none">
+      <div class="field">
+        <label>可用分辨率</label>
+        <table><thead><tr><th></th><th>format_id</th><th>分辨率</th><th>帧率</th><th>协议</th><th>大小</th></tr></thead>
+        <tbody id="fmtBody"></tbody></table>
+      </div>
+
+      <div class="field">
+        <label>目标字幕语言（可多选，源语言自动检测并保留）</label>
+        <div id="langChips" class="row" style="gap:6px"></div>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="langsExtra" size="10"
+                 placeholder="其他语言代码，如 it,pl" style="flex:0 1 240px">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="row">
+          <label class="chip" style="cursor:pointer; display:inline-flex; align-items:center; gap:6px">
+            <input type="checkbox" id="burn"> 硬字幕烧录</label>
+          <select id="fontName" title="硬字幕字体">
+            <option value="">字体：默认</option>
+            <option value="Microsoft YaHei">微软雅黑</option>
+            <option value="SimHei">黑体</option>
+            <option value="SimSun">宋体</option>
+            <option value="KaiTi">楷体</option>
+            <option value="Arial">Arial</option>
+          </select>
+          <select id="fontSize" title="硬字幕字号">
+            <option value="14">14 号</option>
+            <option value="18" selected>18 号</option>
+            <option value="24">24 号</option>
+            <option value="32">32 号</option>
+            <option value="44">44 号</option>
+          </select>
+          <select id="position" title="字幕位置">
+            <option value="bottom" selected>底部居中</option>
+            <option value="middle">画面中部</option>
+            <option value="top">顶部居中</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:12px; align-items:flex-start; gap:16px">
+          <img id="stylePreview" alt="字幕样式预览" width="320" height="180"
+               style="border-radius:8px; border:1px solid var(--border); background:#232a3a">
+          <div class="hint" style="flex:1; margin:0">
+            左图即硬字幕烧录效果：位置、字体、字号改动实时更新。<br>
+            软字幕外观由播放器决定，位置与样式不生效。
+          </div>
+        </div>
+        <div class="hint">字体、字号与位置仅在硬字幕烧录时生效；软字幕外观由播放器决定。</div>
+      </div>
+
+      <div class="field">
+        <label>网络与加速</label>
+        <div class="row">
+          <select id="proxyMode" style="flex:0 0 auto">
+            <option value="system">代理：跟随系统</option>
+            <option value="direct">直连（绕过系统代理）</option>
+            <option value="custom">自定义代理</option>
+          </select>
+          <input type="text" id="customProxy" placeholder="http://127.0.0.1:7890"
+                 style="flex:0 1 220px; display:none">
+          <label class="chip" style="cursor:pointer; display:inline-flex; align-items:center; gap:6px">
+            <input type="checkbox" id="useAria2c"> aria2c 多线程</label>
+          <label class="opt">分段并发
+            <input type="number" id="fragConcurrency" value="16" min="1" max="32"
+                   title="B站/YouTube 等分段流的并发下载线程数"></label>
+          <button class="ghost" onclick="saveSettings()">保存设置</button>
+          <span id="settingsHint" class="inline-feedback"></span>
+        </div>
+        <div class="hint">分段流（B站/YouTube）默认 8 线程并发；直链大文件走 aria2c 16 连接。下载慢优先试「直连」——系统代理常常是慢的根源。</div>
+      </div>
+
+      <div class="field">
+        <label>识别与翻译</label>
+        <div class="row">
+          <select id="whisperModel" title="Whisper 模型：越大越准越慢">
+            <option value="tiny">识别：tiny（快/粗）</option>
+            <option value="base">识别：base</option>
+            <option value="small" selected>识别：small（推荐）</option>
+            <option value="medium">识别：medium（慢/准）</option>
+          </select>
+          <select id="transProvider" title="多语言字幕靠 LLM 翻译">
+            <option value="null">翻译：关闭（仅源语言）</option>
+            <option value="llm">翻译：LLM 接口</option>
+          </select>
+          <input type="password" id="llmKey" placeholder="LLM API Key" size="12" style="display:none">
+          <input type="text" id="llmModel" placeholder="glm-4-flash" size="10" style="display:none">
+        </div>
+        <div class="hint">勾选了非源语言但没有配置翻译时，对应字幕会被跳过；配置 LLM 后（GLM/DeepSeek 等 OpenAI 兼容接口均可）自动翻译全部选中语言。</div>
+      </div>
+
+      <div class="field">
+        <label for="outputDir">输出目录</label>
+        <div class="row">
+          <input type="text" id="outputDir"
+                 placeholder="留空保存到默认数据目录，或点「浏览」选择磁盘与文件夹">
+          <button class="ghost" onclick="openDirPicker()">浏览…</button>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:4px">
+        <button class="primary" onclick="submitTask()">开始任务</button>
+        <span id="submitHint" class="inline-feedback"></span>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-head">
+    <h2>任务列表</h2>
+    <span class="muted" id="taskCount"></span>
+  </div>
+  <table>
+    <thead><tr><th>任务</th><th>状态</th><th>阶段</th><th style="width:190px">进度</th><th>产物</th></tr></thead>
+    <tbody id="taskBody"><tr><td colspan="5" class="muted">暂无任务，先在上方创建一个</td></tr></tbody>
+  </table>
+</div>
+
+<dialog id="dirDlg">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+    <h2>选择输出目录</h2>
+    <button class="ghost" onclick="document.getElementById('dirDlg').close()">关闭</button>
+  </div>
+  <div class="row" id="driveChips" style="margin-bottom:10px"></div>
+  <div class="muted mono" id="dirPath" style="margin-bottom:8px"></div>
+  <div id="dirList" style="max-height:300px; overflow:auto; border:1px solid var(--bg-divide);
+       border-radius:8px"></div>
+  <div class="row" style="margin-top:12px">
+    <button class="ghost" onclick="navDir(dirState.parent)" id="btnUp">上一级</button>
+    <button class="ghost" onclick="navDir(dirState.home)">我的主目录</button>
+    <span style="flex:1"></span>
+    <button class="primary" onclick="pickDir()">选择当前目录</button>
+  </div>
+</dialog>
+
+<dialog id="editDlg">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+    <h2 id="editTitle">编辑字幕</h2>
+    <button class="ghost" onclick="document.getElementById('editDlg').close()">关闭</button>
+  </div>
+  <textarea id="editArea" spellcheck="false"></textarea>
+  <div class="row" style="margin-top:12px">
+    <button class="primary" onclick="saveSubtitle()">保存字幕</button>
+    <button class="ghost" onclick="rerender()">按此字幕重新封装视频</button>
+    <span id="editHint" class="inline-feedback"></span>
+  </div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+let currentTask = null;
+let probeData = null;
+
+// 站点标题/错误消息等内容插入 DOM 前统一转义（防远端标题夹带 HTML）
+const esc = s => String(s).replace(/[&<>"]/g,
+  ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[ch]));
+const jsq = s => String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+
+const STAGE_ZH = {download: "下载", extract: "提取音频", transcribe: "语音识别",
+                  translate: "翻译字幕", render: "封装输出"};
+const STATUS_ZH = {pending: "等待中", running: "进行中", completed: "已完成",
+                   failed: "失败", interrupted: "已中断", cancelled: "已取消",
+                   created: "已创建", done: "完成"};
+const DOT_CLS = {completed: "ok", failed: "err", running: "run", cancelled: ""};
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { const j = await r.json(); msg = (j.detail && (j.detail.message || j.detail)) || msg; } catch {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+async function probe() {
+  const url = $('url').value.trim();
+  if (!url) return;
+  const btn = $('btnProbe');
+  btn.disabled = true; btn.textContent = "分析中…";
+  $('probeInfo').textContent = "正在请求视频站点，请稍候";
+  try {
+    probeData = await api('/api/v1/probe', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url})
+    });
+    const dur = probeData.duration ? ` · 时长 ${Math.round(probeData.duration)} 秒` : "";
+    $('probeInfo').textContent = `《${probeData.title}》 · 识别引擎 ${probeData.engine}${dur}`;
+    $('fmtBody').innerHTML = probeData.formats.map((f, i) => `
+      <tr><td><input type="radio" name="fmt" value="${f.format_id}"
+             data-res="${f.label}" ${i === 0 ? 'checked' : ''}></td>
+      <td class="mono">${f.format_id}</td><td>${f.label}</td>
+      <td>${f.fps ? f.fps + ' fps' : '-'}</td><td class="mono">${f.protocol}</td>
+      <td>${f.filesize ? (f.filesize / 1048576).toFixed(1) + ' MB' : '-'}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="muted">无可选分辨率，将按源画质下载</td></tr>';
+    $('formatsBox').style.display = 'block';
+  } catch (e) {
+    $('probeInfo').textContent = "分析失败：" + e.message;
+    $('probeInfo').classList.add('err');
+  }
+  btn.disabled = false; btn.textContent = "分析链接";
+}
+
+function pickResolution() {
+  const el = document.querySelector('input[name=fmt]:checked');
+  if (!el) return 'best';
+  return el.dataset.res === 'source' ? 'best' : el.value;
+}
+
+// 语言多选 chips
+const LANGS = [
+  ["zh", "中文"], ["en", "英语"], ["ja", "日语"], ["ko", "韩语"], ["es", "西语"],
+  ["fr", "法语"], ["de", "德语"], ["ru", "俄语"], ["pt", "葡语"], ["th", "泰语"], ["vi", "越南语"]
+];
+const selectedLangs = new Set(["zh"]);
+function renderLangChips() {
+  $("langChips").innerHTML = LANGS.map(([c, n]) =>
+    `<button type="button" class="chip ${selectedLangs.has(c) ? "chip-on" : ""}"
+      onclick="toggleLang('${c}')" aria-pressed="${selectedLangs.has(c)}">${n}</button>`).join("");
+}
+function toggleLang(code) {
+  selectedLangs.has(code) ? selectedLangs.delete(code) : selectedLangs.add(code);
+  renderLangChips();
+}
+renderLangChips();
+
+function pickLangs() {
+  const extra = $("langsExtra").value.split(",").map(s => s.trim()).filter(Boolean);
+  return [...new Set([...selectedLangs, ...extra])];
+}
+
+// 网络与加速设置
+function toggleCustomProxy() {
+  $("customProxy").style.display = $("proxyMode").value === "custom" ? "block" : "none";
+}
+$("proxyMode").addEventListener("change", toggleCustomProxy);
+
+function toggleTrans() {
+  const on = $("transProvider").value === "llm";
+  $("llmKey").style.display = on ? "block" : "none";
+  $("llmModel").style.display = on ? "block" : "none";
+}
+$("transProvider").addEventListener("change", toggleTrans);
+
+async function loadSettings() {
+  try {
+    const c = await api("/api/v1/config");
+    $("proxyMode").value = c.download.proxy_mode || "system";
+    $("customProxy").value = c.download.custom_proxy || "";
+    $("useAria2c").checked = !!c.download.aria2c_enabled;
+    $("fragConcurrency").value = c.download.fragments_concurrency || 16;
+    $("whisperModel").value = c.model || "small";
+    $("transProvider").value = c.translator_provider || "null";
+    // Key 不回显明文：留空表示保持已保存值
+    $("llmKey").value = "";
+    $("llmKey").placeholder = c.llm_api_key_masked
+      ? `已保存 ${c.llm_api_key_masked}，留空保持不变` : "LLM API Key";
+    $("llmModel").value = c.llm_model || "";
+    toggleCustomProxy();
+    toggleTrans();
+  } catch {}
+}
+
+async function saveSettings() {
+  try {
+    await api("/api/v1/config", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({proxy_mode: $("proxyMode").value,
+        custom_proxy: $("customProxy").value.trim(),
+        aria2c_enabled: $("useAria2c").checked,
+        fragments_concurrency: parseInt($("fragConcurrency").value) || 16,
+        model: $("whisperModel").value,
+        translator_provider: $("transProvider").value,
+        llm_api_key: $("llmKey").value,
+        llm_model: $("llmModel").value})});
+    $("settingsHint").textContent = "已保存并生效";
+    setTimeout(() => $("settingsHint").textContent = "", 3000);
+  } catch (e) { $("settingsHint").textContent = "保存失败：" + e.message; }
+}
+loadSettings();
+
+// 字幕样式预览：字体/字号/位置改动实时刷新预览帧
+function updatePreview() {
+  const q = new URLSearchParams({font_name: $("fontName").value,
+    font_size: $("fontSize").value, position: $("position").value,
+    text: "字幕预览 Subtitle Preview 123"});
+  $("stylePreview").src = "/api/v1/preview/subtitle?" + q.toString() + "&t=" + Date.now();
+}
+["fontName", "fontSize", "position"].forEach(id =>
+  $(id).addEventListener("change", updatePreview));
+updatePreview();
+
+async function submitTask() {
+  const url = $('url').value.trim();
+  if (!url) return;
+  $('submitHint').textContent = "提交中…";
+  $('submitHint').classList.remove('err');
+  try {
+    const t = await api('/api/v1/tasks', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ url, resolution: pickResolution(),
+        langs: pickLangs(),
+        burn: $('burn').checked,
+        output_dir: $('outputDir').value.trim(),
+        font_name: $('fontName').value,
+        font_size: parseInt($('fontSize').value) || 0,
+        position: $('position').value })
+    });
+    $('submitHint').textContent = `已创建任务 ${t.id}`;
+    refreshTasks();
+  } catch (e) {
+    $('submitHint').textContent = "提交失败：" + e.message;
+    $('submitHint').classList.add('err');
+  }
+}
+
+let stageMap = {};   // tid -> {stage: status}（跨阶段累计，算总进度用）
+let progressMap = {}; // tid -> {fraction, speed, eta, note}
+let statusMap = {};  // tid -> 任务状态
+
+// 加权总进度：跨阶段单调递增，下载后不再"跳回"转写百分比
+const STAGE_ORDER = ["download", "extract", "transcribe", "translate", "render"];
+const STAGE_WEIGHT = {download: 0.40, extract: 0.05, transcribe: 0.35,
+                      translate: 0.10, render: 0.10};
+// 运行中但还没有进度事件时的阶段内默认占比：
+// 有百分比反馈的阶段（下载/识别/渲染）从 0 起步，无反馈的（提取/翻译）按 50%
+const DEFAULT_RUNNING = {download: 0, extract: 0.5, transcribe: 0,
+                         translate: 0.5, render: 0};
+
+function overallProgress(tid) {
+  if (statusMap[tid] === "completed") return 1;
+  const stages = stageMap[tid] || {};
+  let total = 0;
+  for (let i = 0; i < STAGE_ORDER.length; i++) {
+    const stage = STAGE_ORDER[i], weight = STAGE_WEIGHT[stage];
+    const st = stages[stage];
+    if (st === "done") { total += weight; continue; }
+    if (st === "running") {
+      const p = progressMap[tid];
+      // 注意 !== undefined：fraction 为 0 是真实数据，不能当"无数据"处理
+      const frac = p && p.fraction !== undefined
+        ? Math.min(p.fraction, 1) : (DEFAULT_RUNNING[stage] ?? 0.5);
+      total += weight * frac;
+    }
+    break; // 当前阶段之后的阶段尚未开始
+  }
+  return Math.min(total, 0.999);
+}
+
+function currentStage(tid) {
+  const stages = stageMap[tid] || {};
+  return STAGE_ORDER.find(s => stages[s] === "running")
+      || STAGE_ORDER.find(s => stages[s] === "done" && s === "render") || "";
+}
+
+// ---- 目录选择器：列出盘符，逐级浏览文件夹 ----
+let dirState = {current: "", parent: "", home: ""};
+
+async function openDirPicker() {
+  const d = await api("/api/v1/fs/drives");
+  dirState.home = d.home;
+  $("driveChips").innerHTML = d.drives.map(p =>
+    `<button type="button" class="chip" onclick="navDir('${jsq(p)}')">${esc(p)}</button>`).join("");
+  const start = $("outputDir").value.trim() || d.drives[0] || d.home;
+  $("dirDlg").showModal();
+  await navDir(start);
+}
+
+async function navDir(path) {
+  if (!path) return;
+  try {
+    const d = await api(`/api/v1/fs/list?path=${encodeURIComponent(path)}`);
+    dirState = {current: d.current, parent: d.parent, home: d.home};
+    $("dirPath").textContent = d.current;
+    $("btnUp").disabled = !d.parent;
+    $("dirList").innerHTML = d.dirs.length ? d.dirs.map(item =>
+      `<div style="padding:7px 12px; cursor:pointer; border-bottom:1px solid var(--bg-divide)"
+             onmouseover="this.style.background='var(--bg-soft)'"
+             onmouseout="this.style.background=''"
+             onclick="navDir('${jsq(item.path)}')">📁 ${esc(item.name)}</div>`).join("")
+      : '<div class="muted" style="padding:10px 12px">此目录下没有子文件夹</div>';
+  } catch (e) { alert(e.message); }
+}
+
+function pickDir() {
+  $("outputDir").value = dirState.current;
+  document.getElementById("dirDlg").close();
+}
+
+async function refreshTasks() {
+  const tasks = await api('/api/v1/tasks');
+  if (!tasks.length) {
+    $('taskBody').innerHTML = '<tr><td colspan="5" class="muted">暂无任务，先在上方创建一个</td></tr>';
+    $('taskCount').textContent = "";
+    return;
+  }
+  $('taskCount').textContent = `共 ${tasks.length} 个任务`;
+  statusMap = {};
+  $('taskBody').innerHTML = tasks.map(t => {
+    statusMap[t.id] = t.status;
+    const p = progressMap[t.id];
+    const overall = overallProgress(t.id);
+    const pct = Math.round(overall * 100);
+    const speed = p?.speed ? ` · ${(p.speed / 1048576).toFixed(2)} MB/s` : "";
+    const eta = p?.eta && p.fraction > 0.02 && p.eta < 7200 ? ` · 剩余 ${p.eta >= 90 ? Math.round(p.eta / 60) + " 分钟" : Math.round(p.eta) + " 秒"}` : "";
+    const note = p?.note ? ` · ${p.note}` : "";
+    const cur = currentStage(t.id);
+    const curFrac = p?.fraction;
+    const stageTxt = cur && curFrac !== undefined && t.status === "running"
+      ? ` · ${STAGE_ZH[cur]} ${Math.round(curFrac * 100)}%` : "";
+    const stages = stageMap[t.id] || {};
+    const stage = cur ? `${STAGE_ZH[cur]} · ${STATUS_ZH[stages[cur]] || ""}`
+                      : (Object.keys(stages).length ? "收尾中" : "-");
+    return `<tr>
+      <td>${esc(t.title || t.url)}<div class="muted mono">${t.id} · ${t.resolution}</div></td>
+      <td><span class="status"><span class="dot ${DOT_CLS[t.status] || ""}"></span>
+          ${STATUS_ZH[t.status] || t.status}</span></td>
+      <td>${stage}${t.status === "running"
+            ? ` <a href="#" style="color:var(--error); text-decoration:none"
+                 onclick="cancelTask('${t.id}');return false">取消</a>` : ""}</td>
+      <td><div class="bar"><i style="width:${pct}%"></i></div>
+          <div class="pct">${pct}%${stageTxt}${speed}${eta}${note}</div></td>
+      <td class="art" id="art-${t.id}"><span class="muted">-</span></td>
+    </tr>`;
+  }).join('');
+  for (const t of tasks) loadArtifacts(t.id, t.status);
+}
+
+async function loadArtifacts(tid, status) {
+  const el = $('art-' + tid);
+  if (!el) return;
+  if (status !== 'completed' && status !== 'failed' && status !== 'cancelled') {
+    el.innerHTML = '<span class="muted">-</span>';
+    return;
+  }
+  try {
+    const d = await api('/api/v1/tasks/' + tid);
+    if (status === 'failed' || status === 'cancelled') {
+      let msg = d.error || "";
+      try { msg = JSON.parse(d.error).message || msg; } catch {}
+      el.innerHTML = `<span class="muted">${esc(msg.slice(0, 48))}</span>`
+        + ` <a href="#" onclick="retryTask('${tid}');return false">↻ 重试</a>`;
+      return;
+    }
+    el.innerHTML = d.artifacts.map(a => {
+      const name = a.path.split(/[\\/]/).pop();
+      const size = a.size ? ` (${(a.size / 1048576).toFixed(1)} MB)` : "";
+      if (a.kind === 'subtitle')
+        return `<a href="#" onclick="openEditor(${a.id}, '${a.lang || ''}', '${tid}');return false">✏️ ${a.lang || name}</a>`;
+      if (a.kind === 'output' || a.kind === 'video')
+        return `<a href="/api/v1/artifacts/${a.id}/file">⬇️ ${name.length > 22 ? name.slice(0, 20) + '…' : name}${size}</a>`;
+      return '';
+    }).join('') || '<span class="muted">无产物</span>';
+  } catch { el.innerHTML = '-'; }
+}
+
+async function retryTask(tid) {
+  try {
+    await api(`/api/v1/tasks/${tid}/retry`, {method: 'POST'});
+    refreshTasks();
+  } catch (e) { alert("重试失败：" + e.message); }
+}
+
+async function cancelTask(tid) {
+  if (!confirm("确定取消该任务？")) return;
+  try {
+    await api(`/api/v1/tasks/${tid}/cancel`, {method: 'POST'});
+    refreshTasks();
+  } catch (e) { alert("取消失败：" + e.message); }
+}
+
+async function openEditor(aid, lang, tid) {
+  currentTask = {aid, lang, tid};
+  $('editTitle').textContent = `编辑字幕（${lang}）`;
+  $('editHint').textContent = "";
+  try {
+    const d = await api(`/api/v1/artifacts/${aid}/content`);
+    $('editArea').value = d.text;
+    $('editDlg').showModal();
+  } catch (e) { alert(e.message); }
+}
+
+async function saveSubtitle() {
+  try {
+    await api(`/api/v1/artifacts/${currentTask.aid}/content`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: $('editArea').value})
+    });
+    $('editHint').textContent = "已保存";
+  } catch (e) { $('editHint').textContent = "保存失败：" + e.message; }
+}
+
+async function rerender() {
+  try {
+    $('editHint').textContent = "重新封装中，请稍候…";
+    await api(`/api/v1/tasks/${currentTask.tid}/rerender`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({lang: currentTask.lang})
+    });
+    $('editHint').textContent = "已按新字幕重新封装";
+    refreshTasks();
+  } catch (e) { $('editHint').textContent = "失败：" + e.message; }
+}
+
+// SSE 实时进度
+const es = new EventSource('/api/v1/events');
+es.onmessage = ev => {
+  const d = JSON.parse(ev.data);
+  if (d.type === 'progress' && d.task_id)
+    progressMap[d.task_id] = {fraction: d.fraction, speed: d.speed_bps,
+                              eta: d.eta || 0, note: d.note || ""};
+  if (d.type === 'stage' && d.task_id) {
+    stageMap[d.task_id] = {...(stageMap[d.task_id] || {}), [d.stage]: d.status};
+    delete progressMap[d.task_id];  // 新阶段开始：清掉上一阶段的百分比，防残留串台
+  }
+  if (d.type === 'task' && d.task_id && (d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled'))
+    refreshTasks();
+  updateBars();
+};
+
+function updateBars() {
+  for (const [tid] of Object.entries(progressMap)) {
+    const row = document.querySelector(`#art-${tid}`)?.closest('tr');
+    if (!row) continue;
+    const overall = overallProgress(tid);
+    row.querySelector('.bar > i').style.width = Math.round(overall * 100) + '%';
+    const sp = row.querySelector('.pct');
+    if (sp && statusMap[tid] === "running") {
+      const p = progressMap[tid] || {};
+      const cur = currentStage(tid);
+      const curFrac = p.fraction !== undefined ? Math.round(p.fraction * 100) + "%" : "";
+      const stageTxt = cur ? ` · ${STAGE_ZH[cur]} ${curFrac}` : "";
+      const eta = p.eta && p.fraction > 0.02 && p.eta < 7200 ? ` · 剩余 ${p.eta >= 90 ? Math.round(p.eta / 60) + " 分钟" : Math.round(p.eta) + " 秒"}` : "";
+      const note = p.note ? ` · ${p.note}` : "";
+      const speed = p.speed ? ` · ${(p.speed / 1048576).toFixed(2)} MB/s` : "";
+      sp.textContent = `总 ${Math.round(overall * 100)}%${stageTxt}${speed}${eta}${note}`;
+    }
+  }
+}
+
+refreshTasks();
+setInterval(refreshTasks, 5000);
+</script>
+</body>
+</html>

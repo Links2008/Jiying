@@ -1,0 +1,30 @@
+[project]
+name = "videosubtitler"
+version = "0.1.0"
+description = "多平台视频下载 + 语音识别生成多语言字幕"
+requires-python = ">=3.10"
+readme = "README.md"
+dependencies = [
+    "yt-dlp>=2024.12.13",
+    "PyYAML>=6.0",
+    "requests>=2.31",
+    "faster-whisper>=1.0.3",
+    "opencc-python-reimplemented>=0.1.7",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn>=0.29", "qrcode[pil]==8.2"]
+desktop = ["pywebview>=5.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+videosubtitler = "cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cli"]
+packages = ["app", "app.core", "app.models", "app.pipeline", "app.api",
+            "app.services", "app.services.engines", "app.services.downloader"]
