@@ -1,0 +1,4 @@
+# 保留本次源码和资源的原始字节，便于按 SHA256 校验。
+mistdown/** -text
+video-subtitler/** -text
+third-party/** -text

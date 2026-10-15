@@ -1,0 +1,60 @@
+# 构建与分发流水线：tag 推送 → Windows 双产物（安装器后续接 Inno Setup）
+# 触发：git tag v0.1.0 && git push --tags，或手动 workflow_dispatch
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # ctranslate2 轮子覆盖最稳的版本
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: 下载外部工具到 bin/
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bin | Out-Null
+          # ffmpeg（essentials 精简版）
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
+          Copy-Item "ffmpeg_tmp/*/bin/ffmpeg.exe" bin/
+          Copy-Item "ffmpeg_tmp/*/bin/ffprobe.exe" bin/
+          # aria2c（多线程下载内核，版本更新时同步改 URL）
+          Invoke-WebRequest https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip -OutFile aria2.zip
+          Expand-Archive aria2.zip -DestinationPath aria2_tmp
+          Copy-Item "aria2_tmp/*/aria2c.exe" bin/
+          # yt-dlp 独立 exe（保留 -U 自更新能力，双通道更新的热更新通道）
+          Invoke-WebRequest https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -OutFile bin/yt-dlp.exe
+          Get-ChildItem bin
+
+      - name: PyInstaller 打包
+        run: pyinstaller build/build.spec --noconfirm
+
+      - name: 组装绿色版 zip（portable.flag 触发数据目录就地存放）
+        shell: pwsh
+        run: |
+          New-Item dist/VideoSubtitler/portable.flag -ItemType File -Force | Out-Null
+          Compress-Archive -Path dist/VideoSubtitler -DestinationPath dist/VideoSubtitler-portable-win64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VideoSubtitler-portable-win64
+          path: dist/VideoSubtitler-portable-win64.zip
+
+      - name: 发布 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/VideoSubtitler-portable-win64.zip

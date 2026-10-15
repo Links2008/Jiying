@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 运行时数据（绿色版/开发态本地生成）
+config.yaml
+data/
+dist/
+build/VideoSubtitler/
+*.spec.bak
+
+# 评测产物（报告保留 JSON，媒体文件不入库）
+eval/asr/*.mp4
+eval/asr/*.wav
+eval/asr/bg.mp4
+eval/pipeline/*.mp4
+eval/pipeline/*.wav
+eval/pipeline/tasks.db
+
+# 打包用外部工具（CI 会重新下载）
+bin/*.exe

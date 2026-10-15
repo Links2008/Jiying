@@ -1,0 +1,30 @@
+name: 创建本次源码标签 v1.1.34.0
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/tag-v1.1.34.0.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 将版本标签绑定到本次提交
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const ref = 'tags/v1.1.34.0';
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            try {
+              const existing = await github.rest.git.getRef({ ...repo, ref });
+              if (existing.data.object.sha !== context.sha) {
+                throw new Error('标签已指向其他提交，停止覆盖');
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({ ...repo, ref: `refs/${ref}`, sha: context.sha });
+            }
+            core.notice(`v1.1.34.0 已核对指向 ${context.sha}`);

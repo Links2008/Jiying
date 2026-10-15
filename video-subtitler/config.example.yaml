@@ -1,0 +1,68 @@
+# VideoSubtitler 配置样例 —— 复制为 config.yaml 后按需修改
+# 所有项均可省略（省略 = 使用内置默认值）
+
+engines:
+  # 引擎降级链：yt-dlp 解析失败时依次尝试 you-get / lux
+  order: [ytdlp, youget, lux]
+
+download:
+  backend: adaptive            # native | aria2c | adaptive
+  fragments_concurrency: 16    # 分片流并发数（yt-dlp -N，YouTube/B站主力加速）
+  speed_floor_kbps: 500        # 速度看门狗阈值（低于该值记日志提醒）
+  rate_limit: ""               # 全局限速，如 "5M"；空 = 不限
+  proxy_mode: system           # system 跟随系统 | direct 强制直连（下载慢优先试这个）| custom
+  custom_proxy: ""             # proxy_mode=custom 时的代理地址
+  aria2c:
+    enabled: true              # 服务启动自动拉起 bin/ 内置 aria2c，直链 16 连接；不可达自动降级
+    rpc_url: http://127.0.0.1:6800/jsonrpc
+    secret: ""                 # aria2c --rpc-secret 对应值
+    poll_interval: 0.5         # 进度轮询间隔（秒）
+    max_conn_per_server: 16
+    split: 16
+    min_split_size: 1M
+
+transcriber:
+  provider: faster-whisper     # 本地离线识别；可扩展云 API Provider
+  model: small                 # tiny/base/small/medium/large-v3（首次使用自动下载）
+  device: auto                 # auto | cpu | cuda
+  compute_type: auto           # auto → cuda=int8_float16 / cpu=int8
+  beam_size: 5                 # 多候选解码；调低会偏向速度
+  condition_on_previous_text: false  # 减少长视频重复识别循环；可按实测恢复 true
+  initial_prompt: ""           # 背景/术语提示，不要填入预期完整台词
+  hotwords: ""                 # 姓名、专有名词等提示；准确率仍需用真实音频评测
+  chunk_seconds: 300           # 长音频 5 分钟一段，支持逐段重试；范围 10–600 秒
+  chunk_overlap_seconds: 2     # 词级时间引擎的重叠上下文；整段文本接口不重复上传
+  lock_detected_language: false # 自动识别逐段检测；已知语种时在界面明确选择源语言
+  hf_endpoint: https://hf-mirror.com   # 模型仓库镜像（默认）；置空串 = 直连 huggingface.co
+
+translator:
+  provider: null               # null=只出源语言字幕 | llm=LLM 批量翻译
+  llm:
+    base_url: https://open.bigmodel.cn/api/paas/v4   # OpenAI 兼容接口即可
+    model: glm-4-flash
+    api_key: ""                # 用 LLM 翻译时必填
+    batch_size: 20
+    batch_char_limit: 6000     # 控制长视频每批原文体积；不截断或丢弃原文
+    context_lines: 3          # 带上相邻字幕以理解梗、代词及未说完的句子
+    domain_context: ""        # 例如：讨论大语言模型的技术访谈
+    terminology_notes: ""     # 例如：人物、专有名词或梗的背景说明
+    glossary: {}              # 可按目标语言配置固定译法：zh: {RAG: 检索增强生成}
+    timeout: 60
+
+render:
+  default: softmux             # softmux 软封装（快）| burn 硬字幕烧录
+  font_size: 18
+  font_name: ""                # 硬字幕字体，如 Microsoft YaHei / SimHei；空 = 默认
+  # burn_resolutions: [1080, 720]   # 烧录时顺带输出的多分辨率版本
+
+# 外部工具路径（留空自动探测：bin/ 内置 → PATH）
+paths:
+  ffmpeg: ""
+  aria2c: ""
+  yt_dlp: ""
+
+# 下载会员内容：Netscape 格式 cookies.txt 路径（浏览器插件导出）
+cookies: ""
+
+# 代理，如 http://127.0.0.1:7890
+proxy: ""

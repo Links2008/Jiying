@@ -1,0 +1,1186 @@
+<Window x:Class="Jiying.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="即影 Jiying"
+        Width="1160" Height="720" MinWidth="860" MinHeight="560"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="SingleBorderWindow" ResizeMode="CanResize" AllowsTransparency="False"
+        Background="Transparent" Foreground="#EAEFF4"
+        FontFamily="{DynamicResource AppFont}" FontSize="15"
+        Loaded="Window_Loaded" Closed="Window_Closed"
+        SourceInitialized="Window_SourceInitialized" StateChanged="Window_StateChanged"
+        SizeChanged="Window_SizeChanged"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="48" ResizeBorderThickness="7" CornerRadius="12" GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
+        <FontFamily x:Key="AppFont">pack://application:,,,/Jiying.Native;component/Assets/Fonts/#Sora, PingFang SC, HarmonyOS Sans SC, MiSans, Microsoft YaHei</FontFamily>
+        <FontFamily x:Key="MonoFont">pack://application:,,,/Jiying.Native;component/Assets/Fonts/#JetBrains Mono, Consolas</FontFamily>
+        <SolidColorBrush x:Key="WindowBrush" Color="#1A0D1118"/>
+        <SolidColorBrush x:Key="RailBrush" Color="#09FFFFFF"/>
+        <SolidColorBrush x:Key="PanelBrush" Color="#0CFFFFFF"/>
+        <SolidColorBrush x:Key="CardBrush" Color="#0DFFFFFF"/>
+        <SolidColorBrush x:Key="InputBrush" Color="#73090C12"/>
+        <SolidColorBrush x:Key="DialogBrush" Color="#FF20252E"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#EAEFF4"/>
+        <SolidColorBrush x:Key="MutedBrush" Color="#818A94"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="#ABB2BA"/>
+        <SolidColorBrush x:Key="SwitchOnBrush" Color="#523050F0"/>
+        <LinearGradientBrush x:Key="GlassGradient" StartPoint="0,0" EndPoint="0.342,0.94"><GradientStop Color="#13FFFFFF" Offset="0"/><GradientStop Color="#08FFFFFF" Offset="1"/></LinearGradientBrush>
+        <SolidColorBrush x:Key="BorderBrush" Color="#17FFFFFF"/>
+        <SolidColorBrush x:Key="BorderStrongBrush" Color="#2BFFFFFF"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#3050F0"/>
+        <SolidColorBrush x:Key="PrimaryInkBrush" Color="White"/>
+        <LinearGradientBrush x:Key="PrimaryGradient" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#5671F4"/><GradientStop Color="#3050F0" Offset="1"/></LinearGradientBrush>
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="#263050F0"/>
+        <SolidColorBrush x:Key="DangerBrush" Color="#D75B68"/>
+        <SolidColorBrush x:Key="SuccessBrush" Color="#51C992"/>
+
+        <Geometry x:Key="IconLink">M9 15l6 -6 M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464 M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463</Geometry>
+        <Geometry x:Key="IconDownload">M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2 M7 11l5 5l5 -5 M12 4l0 12</Geometry>
+        <Geometry x:Key="IconCheck">M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0 M9 12l2 2l4 -4</Geometry>
+        <Geometry x:Key="IconSettings">M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0</Geometry>
+        <Geometry x:Key="IconClipboard">M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2 M9 3m0 2a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z M9 12h6 M9 16h6</Geometry>
+        <Geometry x:Key="IconWand">M6 21l15 -15l-3 -3l-15 15l3 3 M15 6l3 3 M9 3a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2 M19 13a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2</Geometry>
+        <Geometry x:Key="IconDatabase">M12 6m-8 0a8 3 0 1 0 16 0a8 3 0 1 0 -16 0 M4 6v6a8 3 0 0 0 16 0v-6 M4 12v6a8 3 0 0 0 16 0v-6</Geometry>
+        <Geometry x:Key="IconMovie">M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z M8 4l0 16</Geometry>
+        <Geometry x:Key="IconWifi">M12 18l.01 0 M9.172 15.172a4 4 0 0 1 5.656 0 M6.343 12.343a8 8 0 0 1 11.314 0 M3.515 9.515c4.686 -4.687 12.284 -4.687 17 0</Geometry>
+
+        <Geometry x:Key="IconRefresh">M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4 M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4</Geometry>
+
+        <Geometry x:Key="IconFolder">M5 19l2.757 -7.351a1 1 0 0 1 .936 -.649h12.307a1 1 0 0 1 .986 1.164l-.996 5.211a2 2 0 0 1 -1.964 1.625h-14.026a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2h4l3 3h7a2 2 0 0 1 2 2v2</Geometry>
+
+        <Geometry x:Key="IconTrash">M4 7l16 0 M10 11l0 6 M14 11l0 6 M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12 M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3</Geometry>
+
+        <Geometry x:Key="IconTick">M5 12l5 5l10 -10</Geometry>
+
+        <Geometry x:Key="IconClose">M18 6l-12 12 M6 6l12 12</Geometry>
+
+        <Geometry x:Key="IconBack">M9 14l-4 -4l4 -4 M5 10h11a4 4 0 1 1 0 8h-1</Geometry>
+
+        <Geometry x:Key="IconHome">M5 12l-2 0l9 -9l9 9l-2 0 M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7 M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6</Geometry>
+        <Geometry x:Key="IconLanguage">M4 5h7 M9 3v2c0 4.418 -2.239 8 -5 8 M5 9c0 2.144 2.952 3.908 6.7 4 M13.5 21l3.5 -9l3.5 9 M14.5 18h5</Geometry>
+
+        <Style TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Background" Value="#0CFFFFFF"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,9"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontFamily" Value="{DynamicResource AppFont}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="{TemplateBinding Padding}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#13FFFFFF"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.42"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{DynamicResource PrimaryGradient}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="Padding" Value="22,0"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryInkBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="12" Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                            <Grid>
+                                <Border x:Name="Feedback" Background="White" Opacity="0" CornerRadius="11" IsHitTestVisible="False"/>
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Feedback" Property="Opacity" Value="0.06"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource TextBrush}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="2"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Feedback" Property="Background" Value="Black"/><Setter TargetName="Feedback" Property="Opacity" Value="0.12"/><Setter TargetName="Chrome" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.99" ScaleY="0.99"/></Setter.Value></Setter></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.55"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#0CFFFFFF"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#45242B"/>
+            <Setter Property="BorderBrush" Value="#70404A"/>
+            <Setter Property="Foreground" Value="#FFBDC5"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Height" Value="42"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+                <Border x:Name="NavFocus" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="NavFocus" Property="Opacity" Value="0.7"/></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="NavFocus" Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="ChipButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="13,0"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Background" Value="#0CFFFFFF"/>
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+                <Border x:Name="ChipChrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="16" Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ChipChrome" Property="Background" Value="#13FFFFFF"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="ChipChrome" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Padding" Value="9,6"/>
+            <Setter Property="MinWidth" Value="36"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style x:Key="WindowDotButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter x:Name="DotHost" RenderTransformOrigin="0.5,0.5">
+                            <ContentPresenter.RenderTransform><ScaleTransform/></ContentPresenter.RenderTransform>
+                        </ContentPresenter>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="DotHost" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.84" ScaleY="0.84"/></Setter.Value></Setter></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SegmentButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="12,5"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="SegmentChrome" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="SegmentChrome" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="SwatchButton" TargetType="Button">
+            <Setter Property="Width" Value="32"/><Setter Property="Height" Value="32"/><Setter Property="Padding" Value="0"/><Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Ellipse x:Name="Swatch" Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="{TemplateBinding BorderThickness}" RenderTransformOrigin="0.5,0.5"><Ellipse.RenderTransform><ScaleTransform/></Ellipse.RenderTransform></Ellipse><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Swatch" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1.1" ScaleY="1.1"/></Setter.Value></Setter></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Swatch" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.95" ScaleY="0.95"/></Setter.Value></Setter></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource InputBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+                <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9" Padding="{TemplateBinding Padding}">
+                    <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/></Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="NavCountBadge" TargetType="Border">
+            <Setter Property="MinWidth" Value="22"/>
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="6,0"/>
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="PasswordBox">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource InputBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="PasswordBox">
+                <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9" Padding="{TemplateBinding Padding}">
+                    <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/></Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemChrome" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ItemChrome" Property="Opacity" Value="0.42"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource InputBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="Toggle" Focusable="False" ClickMode="Press"
+                                          Foreground="{TemplateBinding Foreground}" Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" VerticalAlignment="Center"/>
+                                                <Path Grid.Column="1" Data="M0,0 L4,4 L8,0" Stroke="{DynamicResource TextBrush}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}" Margin="0,4,0,0" Padding="4"
+                                        Background="{DynamicResource DialogBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1" CornerRadius="8">
+                                    <ScrollViewer CanContentScroll="True"><ItemsPresenter/></ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Toggle" Property="Opacity" Value="0.42"/></Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Toggle" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Toggle" Property="BorderThickness" Value="2"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="SwitchCheckBox" TargetType="CheckBox">
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="27"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Width="46" Height="27">
+                            <Border x:Name="Track" CornerRadius="14" Background="#1AFFFFFF" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
+                            <Ellipse x:Name="Thumb" Width="20" Height="20" Fill="#B8C0CB" HorizontalAlignment="Left" Margin="4,0,0,0"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource SwitchOnBrush}"/><Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Thumb" Property="Margin" Value="22,0,0,0"/></Trigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions><Condition Binding="{Binding IsChecked, RelativeSource={RelativeSource TemplatedParent}}" Value="True"/><Condition Binding="{Binding Source={x:Static SystemParameters.ClientAreaAnimation}}" Value="True"/></MultiDataTrigger.Conditions>
+                                <MultiDataTrigger.EnterActions><BeginStoryboard><Storyboard><ThicknessAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="Margin" From="4,0,0,0" To="22,0,0,0" Duration="0:0:0.2" FillBehavior="Stop"/></Storyboard></BeginStoryboard></MultiDataTrigger.EnterActions>
+                                <MultiDataTrigger.ExitActions><BeginStoryboard><Storyboard><ThicknessAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="Margin" From="22,0,0,0" To="4,0,0,0" Duration="0:0:0.2" FillBehavior="Stop"/></Storyboard></BeginStoryboard></MultiDataTrigger.ExitActions>
+                            </MultiDataTrigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Track" Property="Opacity" Value="0.45"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="QueueProgressBar" TargetType="ProgressBar">
+            <Setter Property="Height" Value="9"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryGradient}"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ProgressBar">
+                <Border x:Name="PART_Track" Background="{DynamicResource BorderBrush}" CornerRadius="5" ClipToBounds="True">
+                    <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" CornerRadius="5" HorizontalAlignment="Left"/>
+                </Border>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="LanguageChip" TargetType="CheckBox">
+            <Setter Property="Height" Value="28"/><Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,6,6"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
+                <Border x:Name="Pill" CornerRadius="14" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="12,0">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Pill" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style TargetType="Slider">
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="24">
+                            <Track x:Name="PART_Track" VerticalAlignment="Center" Height="24">
+                                <Track.DecreaseRepeatButton><RepeatButton IsTabStop="False" Command="Slider.DecreaseLarge"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="5" VerticalAlignment="Center" Background="{DynamicResource AccentBrush}" CornerRadius="3"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
+                                <Track.Thumb><Thumb Width="18" Height="18"><Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse x:Name="ThumbDot" Fill="{DynamicResource TextBrush}"><Ellipse.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.5"/></Ellipse.Effect></Ellipse><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbDot" Property="Opacity" Value="0.9"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+                                <Track.IncreaseRepeatButton><RepeatButton IsTabStop="False" Command="Slider.IncreaseLarge"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="5" VerticalAlignment="Center" Background="#1FFFFFFF" CornerRadius="3"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ScrollPageButton" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton x:Name="Decrease" Style="{StaticResource ScrollPageButton}" Command="ScrollBar.PageUpCommand" CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbChrome" Margin="3" Background="#1FFFFFFF" CornerRadius="4"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource AccentBrush}"/></Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton x:Name="Increase" Style="{StaticResource ScrollPageButton}" Command="ScrollBar.PageDownCommand" CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Orientation" Value="Horizontal">
+                                <Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="10"/>
+                                <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+                                <Setter TargetName="Decrease" Property="Command" Value="ScrollBar.PageLeftCommand"/>
+                                <Setter TargetName="Increase" Property="Command" Value="ScrollBar.PageRightCommand"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ScrollViewer">
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
+                <Grid Background="{TemplateBinding Background}">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" CanContentScroll="{TemplateBinding CanContentScroll}"/>
+                    <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Width="10" Orientation="Vertical" Style="{StaticResource {x:Type ScrollBar}}" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+                    <ScrollBar x:Name="PART_HorizontalScrollBar" Grid.Row="1" Width="Auto" Height="10" Orientation="Horizontal" Style="{StaticResource {x:Type ScrollBar}}" Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}" Value="{Binding HorizontalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"/>
+                </Grid>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+                <Border x:Name="ItemChrome" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="8">
+                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource PanelBrush}"/></Trigger>
+                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemChrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style TargetType="ListViewItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListViewItem"><ContentPresenter HorizontalAlignment="Stretch"/></ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="SectionCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="20,18"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+        </Style>
+        <Style x:Key="DeleteChoice" TargetType="RadioButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+                <Border x:Name="ChoiceSurface" Background="{DynamicResource InputBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1" CornerRadius="12" Padding="13,12" MinHeight="72">
+                    <ContentPresenter VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsChecked" Value="True"><Setter TargetName="ChoiceSurface" Property="Background" Value="{DynamicResource AccentSoftBrush}"/><Setter TargetName="ChoiceSurface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ChoiceSurface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="SkeletonBlock" TargetType="Control">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control">
+                <Border Background="#0EFFFFFF" CornerRadius="8">
+                    <Grid ClipToBounds="True"><Rectangle>
+                        <Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0.18">
+                            <GradientStop Offset="0.3" Color="#00FFFFFF"/><GradientStop Offset="0.5" Color="#17FFFFFF"/><GradientStop Offset="0.7" Color="#00FFFFFF"/>
+                            <LinearGradientBrush.RelativeTransform><TranslateTransform x:Name="Sweep" X="-1"/></LinearGradientBrush.RelativeTransform>
+                        </LinearGradientBrush></Rectangle.Fill>
+                    </Rectangle></Grid>
+                </Border>
+                <ControlTemplate.Triggers><MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible, RelativeSource={RelativeSource Self}}" Value="True"/>
+                        <Condition Binding="{Binding Source={x:Static SystemParameters.ClientAreaAnimation}}" Value="True"/>
+                    </MultiDataTrigger.Conditions>
+                    <MultiDataTrigger.EnterActions><BeginStoryboard x:Name="SweepAnimation"><Storyboard><DoubleAnimation Storyboard.TargetName="Sweep" Storyboard.TargetProperty="X" From="-1" To="1" Duration="0:0:1.15" RepeatBehavior="Forever"/></Storyboard></BeginStoryboard></MultiDataTrigger.EnterActions>
+                    <MultiDataTrigger.ExitActions><RemoveStoryboard BeginStoryboardName="SweepAnimation"/></MultiDataTrigger.ExitActions>
+                </MultiDataTrigger></ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="UrlBarStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource GlassGradient}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="18,9,9,9"/>
+            <Style.Triggers>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="Heading" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="16"/>
+        </Style>
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="LineHeight" Value="18.5"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <Style x:Key="SettingCard" TargetType="Border" BasedOn="{StaticResource SectionCard}">
+            <Setter Property="Padding" Value="22,20"/>
+        </Style>
+        <Geometry x:Key="SettingsChevron">m6 9l6 6l6-6</Geometry>
+        <Style x:Key="SettingsDisclosureHeader" TargetType="ToggleButton">
+            <EventSetter Event="Checked" Handler="SettingsArrow_Changed"/>
+            <EventSetter Event="Unchecked" Handler="SettingsArrow_Changed"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="MinHeight" Value="44"/>
+            <Setter Property="Padding" Value="22,16"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="ToolTip" Value="展开设置"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
+                <Border x:Name="HeaderChrome" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="14" Padding="{TemplateBinding Padding}">
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Stretch" Margin="0,0,16,0" RecognizesAccessKey="True"/>
+                        <Viewbox Grid.Column="1" Width="16" Height="16" VerticalAlignment="Center">
+                            <Path x:Name="Arrow" Data="{StaticResource SettingsChevron}" Stroke="{DynamicResource SecondaryTextBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" RenderTransformOrigin="0.5,0.5"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
+                        </Viewbox>
+                    </Grid>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderChrome" Property="Background" Value="{DynamicResource PanelBrush}"/></Trigger>
+                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="HeaderChrome" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="HeaderChrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                    <Trigger Property="IsChecked" Value="True"><Setter Property="ToolTip" Value="收起设置"/></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="HeaderChrome" Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="SettingsGroupExpander" TargetType="Expander">
+            <EventSetter Event="Expanded" Handler="SettingsFold_Changed"/>
+            <EventSetter Event="Collapsed" Handler="SettingsFold_Changed"/>
+            <EventSetter Event="Loaded" Handler="SettingsFold_Changed"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
+                <Border Style="{StaticResource SectionCard}" Padding="0" Margin="0">
+                    <StackPanel>
+                        <ToggleButton x:Name="HeaderSite" Style="{StaticResource SettingsDisclosureHeader}" Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" AutomationProperties.Name="{Binding (AutomationProperties.Name), RelativeSource={RelativeSource TemplatedParent}}"/>
+                        <Border x:Name="ExpandSite" Visibility="Collapsed" ClipToBounds="True" Padding="22,18,22,20">
+                            <ContentPresenter ContentSource="Content" HorizontalAlignment="Stretch"/>
+                        </Border>
+                    </StackPanel>
+                </Border>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="SettingsGroupBody" TargetType="Border">
+            <Setter Property="Margin" Value="0,0,0,20"/>
+        </Style>
+        <Style x:Key="SettingsDetailExpander" TargetType="Expander">
+            <EventSetter Event="Expanded" Handler="SettingsFold_Changed"/>
+            <EventSetter Event="Collapsed" Handler="SettingsFold_Changed"/>
+            <EventSetter Event="Loaded" Handler="SettingsFold_Changed"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
+                <StackPanel>
+                    <ToggleButton x:Name="HeaderSite" Style="{StaticResource SettingsDisclosureHeader}" Padding="0,10" Foreground="{TemplateBinding Foreground}" Content="{TemplateBinding Header}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"/>
+                    <Border x:Name="ExpandSite" Visibility="Collapsed" ClipToBounds="True" Margin="0,0,0,4"><ContentPresenter ContentSource="Content"/></Border>
+                </StackPanel>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="SettingHeading" TargetType="TextBlock" BasedOn="{StaticResource Heading}">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="LineHeight" Value="22"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+        </Style>
+        <Style x:Key="SettingLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="FontSize" Value="13.5"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="LineHeight" Value="21"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+        </Style>
+        <Style x:Key="SettingRow" TargetType="Grid">
+            <Setter Property="Margin" Value="0,15"/>
+        </Style>
+        <Style x:Key="SettingLastRow" TargetType="Grid" BasedOn="{StaticResource SettingRow}">
+            <Setter Property="Margin" Value="0,15,0,4"/>
+        </Style>
+        <Style x:Key="SubtitleCueEditor" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="10,9"/>
+            <Setter Property="FontSize" Value="13"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="VerticalContentAlignment" Value="Top"/><Setter Property="Height" Value="Auto"/>
+            <Setter Property="AcceptsReturn" Value="True"/><Setter Property="MinHeight" Value="48"/>
+            <Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger></Style.Triggers>
+        </Style>
+        <DataTemplate x:Key="StageTemplate">
+            <StackPanel Orientation="Horizontal" Margin="0,0,11,0">
+                <Border Width="8" Height="8" CornerRadius="4" Margin="0,0,5,0" VerticalAlignment="Center">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="#536071"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Status}" Value="done"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+                                <DataTrigger Binding="{Binding Status}" Value="running"><Setter Property="Background" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                </Border>
+                <TextBlock Text="{Binding Name}" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+            </StackPanel>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid x:Name="RootGrid" ClipToBounds="True">
+        <Grid x:Name="MistLayer" IsHitTestVisible="False">
+        <Rectangle x:Name="BackgroundVeil" IsHitTestVisible="False" Opacity="0.82">
+            <Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#2C3033" Offset="0"/><GradientStop Color="#292D30" Offset="0.52"/><GradientStop Color="#25292C" Offset="1"/></LinearGradientBrush></Rectangle.Fill>
+        </Rectangle>
+        <Image x:Name="BackgroundImage" Source="/Jiying.Native;component/Assets/etch-bg.jpg" HorizontalAlignment="Left" VerticalAlignment="Top"
+               Stretch="UniformToFill" Opacity="0.30" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+            <Image.RenderTransform><TransformGroup><ScaleTransform x:Name="BackgroundScale"/><TranslateTransform x:Name="BackgroundTranslate"/></TransformGroup></Image.RenderTransform>
+        </Image>
+        <Rectangle x:Name="GrainLayer" IsHitTestVisible="False" Opacity="0.045"><Rectangle.Fill><ImageBrush ImageSource="/Jiying.Native;component/Assets/grain.png" TileMode="Tile" Viewport="0,0,160,160" ViewportUnits="Absolute"/></Rectangle.Fill></Rectangle>
+        <Rectangle x:Name="VignetteLayer" IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.5,0.4" GradientOrigin="0.5,0.4" RadiusX="1.2" RadiusY="0.9"><GradientStop Color="#0004070C" Offset="0.55"/><GradientStop Color="#8004070C" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
+        </Grid>
+        <Grid x:Name="ShellGrid" Background="{DynamicResource WindowBrush}">
+            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition x:Name="CompactNavRow" Height="0"/></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="RailColumn" Width="224"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="Rail" Grid.Column="0" Background="{DynamicResource RailBrush}">
+                <Grid x:Name="RailLayout" Margin="14,20,14,16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel x:Name="LogoPanel" Orientation="Horizontal" Margin="8,4,0,24">
+                        <Border x:Name="LogoMark" Width="38" Height="38" CornerRadius="12" Background="#13FFFFFF" BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1" RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><RotateTransform x:Name="LogoRotate"/></Border.RenderTransform>
+                            <Viewbox Width="24" Height="24"><Canvas Width="96" Height="96">
+                                <Rectangle Width="6" Height="44" RadiusX="3" RadiusY="3" Canvas.Left="9" Canvas.Top="26" Fill="{DynamicResource AccentBrush}" Opacity="0.24"><Rectangle.RenderTransform><RotateTransform Angle="-16" CenterX="12" CenterY="48"/></Rectangle.RenderTransform></Rectangle>
+                                <Rectangle Width="6" Height="44" RadiusX="3" RadiusY="3" Canvas.Left="81" Canvas.Top="26" Fill="{DynamicResource AccentBrush}" Opacity="0.24"><Rectangle.RenderTransform><RotateTransform Angle="16" CenterX="84" CenterY="48"/></Rectangle.RenderTransform></Rectangle>
+                                <Rectangle Width="12" Height="40" RadiusX="6" RadiusY="6" Canvas.Left="42" Canvas.Top="16" Fill="{DynamicResource AccentBrush}"/>
+                                <Path Data="M28,52 L48,72 L68,52" Stroke="{DynamicResource AccentBrush}" StrokeThickness="12" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/>
+                            </Canvas></Viewbox>
+                        </Border>
+                        <TextBlock Text="即影" Foreground="{DynamicResource TextBrush}" FontSize="16" FontWeight="Medium" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                        <StackPanel.Triggers>
+                            <EventTrigger RoutedEvent="MouseEnter"><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="LogoRotate" Storyboard.TargetProperty="Angle" To="-16" Duration="0:0:0.45"><DoubleAnimation.EasingFunction><BackEase Amplitude="0.35" EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation></Storyboard></BeginStoryboard></EventTrigger>
+                            <EventTrigger RoutedEvent="MouseLeave"><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="LogoRotate" Storyboard.TargetProperty="Angle" To="0" Duration="0:0:0.32"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation></Storyboard></BeginStoryboard></EventTrigger>
+                        </StackPanel.Triggers>
+                    </StackPanel>
+
+                    <Grid x:Name="NavHost" Grid.Row="1">
+                        <Border x:Name="NavThumb" Height="42" VerticalAlignment="Top" CornerRadius="12" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                            <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#17FFFFFF" Offset="0"/><GradientStop Color="#0AFFFFFF" Offset="1"/></LinearGradientBrush></Border.Background>
+                            <Border.RenderTransform><TranslateTransform x:Name="NavThumbMove"/></Border.RenderTransform>
+                        </Border>
+                        <StackPanel x:Name="NavPanel">
+                        <Button x:Name="ParseNav" Style="{StaticResource NavButton}" Tag="parse" Click="Nav_Click" AutomationProperties.Name="解析">
+                            <DockPanel><Viewbox Width="19" Height="19" Margin="0,0,11,0"><Canvas Width="24" Height="24"><Path x:Name="ParseNavIcon" Data="{StaticResource IconLink}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock Text="解析"/><Border x:Name="ParseBadge"/></DockPanel>
+                        </Button>
+                        <Button x:Name="QueueNav" Style="{StaticResource NavButton}" Tag="queue" Click="Nav_Click" HorizontalContentAlignment="Stretch" AutomationProperties.Name="传输队列">
+                            <Grid Width="172"><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Viewbox Width="19" Height="19" HorizontalAlignment="Left"><Canvas Width="24" Height="24"><Path x:Name="QueueNavIcon" Data="{StaticResource IconDownload}" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox>
+                                <TextBlock Grid.Column="1" Text="传输队列" VerticalAlignment="Center"/>
+                                <Border x:Name="QueueBadge" Grid.Column="2" Style="{StaticResource NavCountBadge}" Visibility="Collapsed"><TextBlock x:Name="QueueBadgeText" Text="0" Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="DoneNav" Style="{StaticResource NavButton}" Tag="done" Click="Nav_Click" HorizontalContentAlignment="Stretch" AutomationProperties.Name="已完成">
+                            <Grid Width="172"><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Viewbox Width="19" Height="19" HorizontalAlignment="Left"><Canvas Width="24" Height="24"><Path x:Name="DoneNavIcon" Data="{StaticResource IconCheck}" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Canvas></Viewbox>
+                                <TextBlock Grid.Column="1" Text="已完成" VerticalAlignment="Center"/>
+                                <Border x:Name="DoneBadge" Grid.Column="2" Style="{StaticResource NavCountBadge}" Visibility="Collapsed"><TextBlock x:Name="DoneBadgeText" Text="0" Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="SettingsNav" Style="{StaticResource NavButton}" Tag="settings" Click="Nav_Click" AutomationProperties.Name="设置">
+                            <DockPanel><Viewbox Width="19" Height="19" Margin="0,0,11,0"><Canvas Width="24" Height="24"><Path x:Name="SettingsNavIcon" Data="{StaticResource IconSettings}" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock Text="设置"/></DockPanel>
+                        </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <Border x:Name="DiskPanel" Grid.Row="3" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,11">
+                        <StackPanel>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Viewbox Width="16" Height="16" Margin="0,1,9,0" VerticalAlignment="Top"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconDatabase}" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox>
+                                <StackPanel Grid.Column="1"><TextBlock x:Name="OutputPathSideText" Text="视频\即影" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="DiskFreeText" Text="保存到本地磁盘" Style="{StaticResource Caption}" Margin="0,3,0,10"/></StackPanel>
+                            </Grid>
+                            <Border Background="#13FFFFFF" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="8,5">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><Viewbox Width="13" Height="13" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconWifi}" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock x:Name="NetSpeedText" Text="0.0 MB/s" Foreground="{DynamicResource MutedBrush}" FontFamily="{DynamicResource MonoFont}" FontSize="11"/></StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid x:Name="BodyGrid" Grid.Column="1">
+                <StackPanel Visibility="Collapsed"><TextBlock x:Name="PageTitle"/><TextBlock x:Name="PageSubtitle"/><Ellipse x:Name="ConnectionDot"/><TextBlock x:Name="ConnectionText"/></StackPanel>
+
+                <Grid x:Name="PageHost" Margin="40,60,40,56" MaxWidth="860" HorizontalAlignment="Stretch">
+                    <Grid x:Name="ParseView">
+                        <ScrollViewer x:Name="ParseScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center" HorizontalContentAlignment="Stretch">
+                            <Grid x:Name="ParseLayout" MaxWidth="860" HorizontalAlignment="Stretch">
+                            <StackPanel x:Name="ParseContent" MaxWidth="860" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+                              <StackPanel x:Name="ParseHero">
+                                <StackPanel.RenderTransform><TranslateTransform x:Name="ParseHeroMove"/></StackPanel.RenderTransform>
+                                <TextBlock x:Name="ParseHeading" Text="从网里，汲一勺光" Foreground="{DynamicResource TextBrush}" FontSize="40" FontWeight="SemiBold" LineHeight="46" LineStackingStrategy="BlockLineHeight"/>
+                                <TextBlock x:Name="ParseDescription" Text="粘贴链接，选择画质，开始下载。" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" FontSize="15" LineHeight="23.25" LineStackingStrategy="BlockLineHeight" MaxWidth="624" HorizontalAlignment="Left" Margin="0,10,0,26"/>
+                                <Border x:Name="UrlBar" Style="{StaticResource UrlBarStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Viewbox x:Name="UrlClipboardIcon" Width="18" Height="18" Margin="0,0,12,0"><Canvas Width="24" Height="24"><Path x:Name="UrlClipboardPath" Data="{StaticResource IconClipboard}" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox>
+                                        <Grid Grid.Column="1"><TextBox x:Name="UrlBox" BorderThickness="0" Background="Transparent" Padding="0" FontSize="13.5" FontFamily="{DynamicResource MonoFont}" VerticalContentAlignment="Center" KeyDown="UrlBox_KeyDown" TextChanged="UrlBox_TextChanged"/><TextBlock x:Name="UrlPlaceholder" Text="粘贴视频链接，支持哔哩哔哩、YouTube、小红书、抖音、X" Foreground="{DynamicResource MutedBrush}" FontSize="13.5" Margin="0" VerticalAlignment="Center" IsHitTestVisible="False"/></Grid>
+                                        <Button x:Name="ProbeButton" Grid.Column="2" Style="{StaticResource PrimaryButton}" Click="Probe_Click" MinWidth="98" AutomationProperties.Name="解析"><StackPanel Orientation="Horizontal">
+                                            <Grid x:Name="ProbeSpinner" Width="15" Height="15" Margin="0,0,8,0" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                                                <Grid.RenderTransform><RotateTransform x:Name="ProbeSpinnerRotate"/></Grid.RenderTransform>
+                                                <Ellipse Stroke="#4D101838" StrokeThickness="2"/>
+                                                <Path Data="M2.9,2.9 A6.5,6.5 0 0 1 12.1,2.9" Stroke="#142152" StrokeThickness="2"/>
+                                            </Grid>
+                                            <Viewbox x:Name="ProbeButtonIcon" Width="17" Height="17" Margin="0,0,8,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconWand}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock x:Name="ProbeButtonLabel" Text="解析" VerticalAlignment="Center"/>
+                                        </StackPanel></Button>
+                                    </Grid>
+                                </Border>
+                                <WrapPanel x:Name="ParseExamples" Margin="0,16,0,0">
+                                    <TextBlock Text="试试示例链接" Style="{StaticResource Caption}" FontSize="13" Margin="0,6,8,0"/>
+                                    <Button Style="{StaticResource ChipButton}" Tag="https://www.bilibili.com/video/BV1MP4y1m7Ci" Click="Example_Click" Content="哔哩哔哩 4K 短片（15秒）"/>
+                                    <Button Style="{StaticResource ChipButton}" Tag="https://www.youtube.com/watch?v=aqz-KE-bpKQ" Click="Example_Click" Content="YouTube 大雄兔 4K"/>
+                                    <Button Style="{StaticResource ChipButton}" Tag="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4" Click="Example_Click" Content="直链 mp4 测试"/>
+                                </WrapPanel>
+                                <Border x:Name="BilibiliLoginBar" Style="{StaticResource SectionCard}" Visibility="Collapsed" Margin="0,12,0,0" Padding="14">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <Button x:Name="ConnectBilibiliButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="连接 B 站" Click="ConnectBilibili_Click" Margin="12,0,0,0" AutomationProperties.Name="扫码连接 B 站"/>
+                                            <Button x:Name="ConnectPlatformButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="连接官网" Click="ConnectPlatform_Click" Visibility="Collapsed" Margin="12,0,0,0"/>
+                                            <StackPanel VerticalAlignment="Center"><TextBlock x:Name="AuthPlatformTitle" Text="B 站账号（可选）" Foreground="{DynamicResource TextBrush}" FontSize="13" FontWeight="Medium"/><TextBlock x:Name="ParseAuthHint" Text="未登录也可下载公开画质；需要更高清时可连接账号。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"/></StackPanel>
+                                        </DockPanel>
+                                        <StackPanel x:Name="BilibiliQrPanel" Visibility="Collapsed" Margin="0,12,0,0">
+                                            <Border Background="White" Padding="10" HorizontalAlignment="Center" CornerRadius="8"><Image x:Name="BilibiliQrImage" Width="180" Height="180" Stretch="Uniform"/></Border>
+                                            <TextBlock x:Name="BilibiliQrStatus" Text="使用哔哩哔哩 App 扫码，并在手机上确认。" Style="{StaticResource Caption}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                        </StackPanel>
+                                        <Expander x:Name="BilibiliLoginAdvanced" Header="其他连接方式" Foreground="{DynamicResource SecondaryTextBrush}" IsExpanded="False" Margin="0,8,0,0">
+                                            <StackPanel Margin="0,8,0,0">
+                                                <WrapPanel>
+                                                    <ComboBox x:Name="ParseAuthSourceBox" Width="160" SelectedValuePath="Tag" SelectedIndex="0" SelectionChanged="ParseAuthSource_Changed" Margin="0,0,8,6" AutomationProperties.Name="网站登录来源"><ComboBoxItem Tag="">未登录</ComboBoxItem><ComboBoxItem Tag="edge">从 Edge 读取</ComboBoxItem><ComboBoxItem Tag="chrome">从 Chrome 读取</ComboBoxItem><ComboBoxItem Tag="firefox">从 Firefox 读取</ComboBoxItem><ComboBoxItem Tag="file">Cookie 文件</ComboBoxItem></ComboBox>
+                                                    <Button x:Name="BrowseCookiesButton" Style="{StaticResource GhostButton}" Content="选择文件" Click="BrowseCookies_Click" Visibility="Collapsed" Margin="0,0,8,6"/>
+                                                    <Button x:Name="ReadLoginButton" Style="{StaticResource GhostButton}" Content="读取并刷新" Click="ReadLogin_Click" Margin="0,0,0,6"/>
+                                                </WrapPanel>
+                                                <TextBox x:Name="ParseCookiesFileBox" IsReadOnly="True" Visibility="Collapsed" Margin="0,0,0,6" AutomationProperties.Name="Cookie 文件路径"/>
+                                            </StackPanel>
+                                        </Expander>
+                                    </StackPanel>
+                                </Border>
+                              </StackPanel>
+
+                                <Border x:Name="ParseLoading" Style="{StaticResource SectionCard}" Visibility="Collapsed" Margin="0,30,0,0" Padding="18" AutomationProperties.Name="正在分析链接与可用画质">
+                                    <Grid x:Name="SkeletonLayout"><Grid.ColumnDefinitions><ColumnDefinition x:Name="SkeletonThumbColumn" Width="264"/><ColumnDefinition x:Name="SkeletonGapColumn" Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <Control x:Name="SkeletonThumb" Style="{StaticResource SkeletonBlock}" Height="148" VerticalAlignment="Top"/>
+                                        <Grid x:Name="SkeletonLines" Grid.Column="2" Margin="0,8,0,0"><Grid.RowDefinitions><RowDefinition Height="18"/><RowDefinition Height="13"/><RowDefinition Height="13"/><RowDefinition Height="21"/><RowDefinition Height="36"/><RowDefinition Height="55"/></Grid.RowDefinitions>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="72*"/><ColumnDefinition Width="28*"/></Grid.ColumnDefinitions><Control Style="{StaticResource SkeletonBlock}"/></Grid>
+                                            <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="42*"/><ColumnDefinition Width="58*"/></Grid.ColumnDefinitions><Control Style="{StaticResource SkeletonBlock}"/></Grid>
+                                            <Control Style="{StaticResource SkeletonBlock}" Grid.Row="4" Margin="0,0,24,0"/>
+                                            <StackPanel Grid.Row="5" Orientation="Horizontal" VerticalAlignment="Bottom"><Control Style="{StaticResource SkeletonBlock}" Width="148" Height="42" Margin="0,0,10,0"/><Control Style="{StaticResource SkeletonBlock}" Width="118" Height="42"/></StackPanel>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                                <Border x:Name="ParseFailure" Style="{StaticResource SectionCard}" Visibility="Collapsed" Margin="0,22,0,0">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Click="Probe_Click" Margin="16,0,0,0" AutomationProperties.Name="重试"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconRefresh}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="重试" VerticalAlignment="Center"/></StackPanel></Button>
+                                        <StackPanel><TextBlock Text="分析失败" Style="{StaticResource Heading}"/><TextBlock x:Name="ParseFailureText" Style="{StaticResource Caption}" Margin="0,7,0,0"/></StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <StackPanel x:Name="ProbePanel" Visibility="Collapsed" Margin="0,30,0,0">
+                                    <Border Style="{StaticResource SectionCard}" Padding="18" Background="{DynamicResource GlassGradient}">
+                                        <Grid x:Name="ProbePreviewLayout">
+                                            <Grid.ColumnDefinitions><ColumnDefinition x:Name="ProbeThumbColumn" Width="286"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Border x:Name="ProbePreviewThumb" Width="264" Height="148" HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="12" ClipToBounds="True" SizeChanged="ProbePreviewThumb_SizeChanged">
+                                                <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#16535A"/><GradientStop Color="#102C38" Offset="1"/></LinearGradientBrush></Border.Background>
+                                                <Grid><Viewbox Width="34" Height="34"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconMovie}" Stroke="{DynamicResource MutedBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><Image x:Name="ProbeThumbnail" Stretch="UniformToFill"/></Grid>
+                                            </Border>
+                                            <StackPanel x:Name="ProbePreviewBody" Grid.Column="1">
+                                                <TextBlock x:Name="ProbeTitle" Foreground="{DynamicResource TextBrush}" FontWeight="Medium" FontSize="16.5" LineHeight="23.1" LineStackingStrategy="BlockLineHeight" MaxHeight="46.2" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
+                                                <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="9,0" HorizontalAlignment="Left" Margin="0,7,0,16"><TextBlock x:Name="ProbeMeta" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11.5" LineHeight="22" LineStackingStrategy="BlockLineHeight"/></Border>
+                                                <DockPanel Margin="0,1,0,8"><Button x:Name="RefreshQualityButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="刷新画质" Click="RefreshQuality_Click" Padding="10,5"/><TextBlock Text="选择画质" Foreground="{DynamicResource TextBrush}" FontSize="13" VerticalAlignment="Center"/></DockPanel>
+                                                <TextBlock x:Name="ProbeQualityHint" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                                <ComboBox x:Name="FormatList" Height="40" MaxDropDownHeight="420" IsTextSearchEnabled="True" TextSearch.TextPath="Label" ItemsSource="{Binding ProbeFormats}" SelectionChanged="FormatList_SelectionChanged" AutomationProperties.Name="视频画质" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ToolTip="展开选择画质，或输入 4K、1080 等画质名称；方向键切换，Enter 确认。">
+                                                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding SelectionText}" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectionText}"/></DataTemplate></ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                                <Grid x:Name="SubmitActions" Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <Button x:Name="SubmitButton" Style="{StaticResource PrimaryButton}" Click="Submit_Click" HorizontalAlignment="Stretch" AutomationProperties.Name="开始下载" Content="开始下载"/>
+                                                    <Button x:Name="PrepareWhisperButton" Grid.Column="1" Style="{StaticResource GhostButton}" Content="下载语音模型" Click="DownloadWhisper_Click" Height="44" Visibility="Collapsed" Margin="8,0,0,0"/>
+                                                </Grid>
+                                                <Border x:Name="WhisperPrompt" Visibility="Collapsed" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,10,0,0">
+                                                    <StackPanel>
+                                                        <TextBlock x:Name="ParseWhisperStatusText" Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+                                                        <ProgressBar x:Name="ParseWhisperProgress" Height="4" Maximum="100" Visibility="Collapsed" Margin="0,8,0,0"/>
+                                                    </StackPanel>
+                                                </Border>
+                                                <TextBlock x:Name="SubmitHint" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+
+                                    <Border Style="{StaticResource SectionCard}">
+                                        <StackPanel>
+                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Viewbox Width="16" Height="16" Margin="0,0,8,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconLanguage}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="字幕" Foreground="{DynamicResource TextBrush}" FontSize="14" FontWeight="Medium"/></StackPanel>
+                                                 <ComboBox x:Name="SubtitleModeBox" Grid.Column="1" Width="190" SelectedValuePath="Tag" SelectionChanged="SubtitleChoice_Changed" AutomationProperties.Name="字幕模式">
+                                                     <ComboBoxItem Tag="none">不生成字幕</ComboBoxItem><ComboBoxItem Tag="source">原语言字幕</ComboBoxItem><ComboBoxItem Tag="translate">翻译字幕</ComboBoxItem>
+                                                 </ComboBox>
+                                             </Grid>
+                                             <TextBlock x:Name="SubtitleModeSummary" Style="{StaticResource Caption}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,7,0,0"/>
+                                             <CheckBox x:Name="RecognizeCheck" Visibility="Collapsed"/>
+                                             <CheckBox x:Name="TranslateCheck" Visibility="Collapsed"/>
+                                             <StackPanel x:Name="RecognitionOptions" ClipToBounds="True">
+                                             <Separator Background="{DynamicResource BorderBrush}" Margin="0,12,0,0"/>
+                                             <Grid x:Name="TranslationLanguageRow" Margin="0,11,0,5" ClipToBounds="True"><Grid.ColumnDefinitions><ColumnDefinition Width="98"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="目标语言" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12.5" VerticalAlignment="Center"/>
+                                                <WrapPanel x:Name="LanguagePanel" Grid.Column="1"/>
+                                            </Grid>
+                                            <Expander x:Name="SubtitleAdvanced" IsExpanded="False" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,8,0,0" AutomationProperties.Name="字幕高级设置">
+                                                <Expander.Header><TextBlock Text="高级设置 · 模型与接口" FontSize="13"/></Expander.Header>
+                                                <StackPanel>
+<Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,11,0,1"><WrapPanel>
+                                                 <TextBlock Margin="0,0,10,10" Text="识别模型" Width="88" FontSize="12.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                                                <ComboBox Margin="0,0,10,10" x:Name="WhisperParseBox" Width="170" SelectedValuePath="Tag" SelectionChanged="ParseConfig_Changed">
+                                                    <ComboBoxItem Tag="tiny">tiny（快/粗）</ComboBoxItem><ComboBoxItem Tag="base">base</ComboBoxItem><ComboBoxItem Tag="small">small（推荐）</ComboBoxItem><ComboBoxItem Tag="medium">medium（慢/准）</ComboBoxItem><ComboBoxItem Tag="large-v3">large-v3（最大/最准）</ComboBoxItem>
+                                                </ComboBox>
+                                            </WrapPanel></Border>
+<Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,11,0,1"><WrapPanel>
+                                                <TextBlock Margin="0,0,10,10" Text="源语言" Width="88" FontSize="12.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                                                <ComboBox Margin="0,0,10,10" x:Name="SourceLanguageBox" Width="110" SelectedValuePath="Tag" SelectionChanged="UiOption_Changed">
+                                                    <ComboBoxItem Tag="">自动检测</ComboBoxItem><ComboBoxItem Tag="zh">中文</ComboBoxItem><ComboBoxItem Tag="en">英语</ComboBoxItem><ComboBoxItem Tag="ja">日语</ComboBoxItem><ComboBoxItem Tag="ko">韩语</ComboBoxItem><ComboBoxItem Tag="es">西语</ComboBoxItem><ComboBoxItem Tag="fr">法语</ComboBoxItem><ComboBoxItem Tag="de">德语</ComboBoxItem><ComboBoxItem Tag="ru">俄语</ComboBoxItem><ComboBoxItem Tag="pt">葡语</ComboBoxItem><ComboBoxItem Tag="th">泰语</ComboBoxItem><ComboBoxItem Tag="vi">越南语</ComboBoxItem>
+                                                </ComboBox>
+                                            </WrapPanel></Border>
+<Border x:Name="TranslationProviderRow" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,11,0,1" ClipToBounds="True"><WrapPanel>
+                                                 <TextBlock Margin="0,0,10,10" Text="翻译引擎" Width="88" FontSize="12.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                                                <ComboBox Margin="0,0,10,10" x:Name="TranslationParseBox" Width="148" SelectedValuePath="Tag" SelectionChanged="ParseConfig_Changed"><ComboBoxItem Tag="null">关闭（仅源语言）</ComboBoxItem><ComboBoxItem Tag="llm">LLM 接口</ComboBoxItem></ComboBox>
+                                                <ComboBox Margin="0,0,10,10" x:Name="LlmVendorParseBox" Width="155" SelectedValuePath="Tag" SelectionChanged="ParseLlmVendor_Changed"><ComboBoxItem Tag="deepseek">deepseek</ComboBoxItem><ComboBoxItem Tag="openai">OpenAI</ComboBoxItem><ComboBoxItem Tag="siliconflow">硅基流动</ComboBoxItem><ComboBoxItem Tag="zhipu">智谱 GLM</ComboBoxItem><ComboBoxItem Tag="custom">自定义</ComboBoxItem></ComboBox>
+                                                <TextBox Margin="0,0,10,10" x:Name="LlmBaseParseBox" Width="210" ToolTip="接口地址" LostFocus="ParseTextConfig_Changed"/><TextBox Margin="0,0,10,10" x:Name="LlmModelParseBox" Width="120" ToolTip="模型名" LostFocus="ParseTextConfig_Changed"/>
+                                            </WrapPanel></Border>
+<Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,11,0,1"><WrapPanel>
+                                                <TextBlock Margin="0,0,10,10" Text="识别引擎" Width="88" FontSize="12.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                                                <ComboBox Margin="0,0,10,10" x:Name="AsrProviderParseBox" Width="175" SelectedValuePath="Tag" SelectionChanged="ParseConfig_Changed"><ComboBoxItem Tag="faster-whisper">本地 faster-whisper</ComboBoxItem><ComboBoxItem Tag="cloud">云端 API</ComboBoxItem></ComboBox>
+                                                <ComboBox Margin="0,0,10,10" x:Name="AsrVendorParseBox" Width="155" SelectedValuePath="Tag" SelectionChanged="ParseAsrVendor_Changed"><ComboBoxItem Tag="openai">OpenAI</ComboBoxItem><ComboBoxItem Tag="siliconflow">硅基流动</ComboBoxItem><ComboBoxItem Tag="zhipu">智谱 GLM</ComboBoxItem><ComboBoxItem Tag="custom">自定义</ComboBoxItem></ComboBox>
+                                                <TextBox Margin="0,0,10,10" x:Name="AsrBaseParseBox" Width="210" ToolTip="接口地址" LostFocus="ParseTextConfig_Changed"/><TextBox Margin="0,0,10,10" x:Name="AsrModelParseBox" Width="120" ToolTip="模型名" LostFocus="ParseTextConfig_Changed"/>
+                                            </WrapPanel></Border>
+                                             <TextBlock x:Name="SubtitleOptionsHint" Text="接口凭证在「设置」中配置。" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+                                                </StackPanel>
+                                            </Expander>
+                                             </StackPanel>
+
+                                    <Border x:Name="BurnCard" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,14,0,0" Margin="0,14,0,0" Visibility="Collapsed" ClipToBounds="True">
+                                        <StackPanel>
+                                            <WrapPanel>
+                                                 <TextBlock Text="烧录到画面" Width="88" FontSize="12.5" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                                                 <CheckBox x:Name="BurnCheck" Style="{StaticResource SwitchCheckBox}" AutomationProperties.Name="启用硬字幕烧录" Click="BurnOption_Changed" Margin="0,0,10,10"><CheckBox.LayoutTransform><ScaleTransform ScaleX="0.88" ScaleY="0.88"/></CheckBox.LayoutTransform></CheckBox>
+                                             </WrapPanel>
+                                             <TextBlock Text="默认使用可切换字幕；开启烧录后可调整字体与位置。" Style="{StaticResource Caption}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,8"/>
+                                             <StackPanel x:Name="BurnSettingsPanel" ClipToBounds="True">
+                                             <WrapPanel>
+                                                 <CheckBox x:Name="BilingualCheck" Content="中英双语上下" FontSize="12" VerticalAlignment="Center" Click="BurnOption_Changed" Margin="0,0,10,10"/>
+                                                <ComboBox x:Name="FontNameBox" DropDownOpened="FontNameBox_DropDownOpened" Width="210" MaxDropDownHeight="300" IsTextSearchEnabled="True" Margin="0,0,8,8" SelectedValuePath="Tag" SelectionChanged="BurnStyle_Changed" ToolTip="内置思源黑体和本机已安装字体，无需额外下载" AutomationProperties.Name="字幕字体"><ComboBoxItem Tag="Noto Sans CJK SC">思源黑体 简体</ComboBoxItem><ComboBoxItem Tag="Microsoft YaHei">微软雅黑</ComboBoxItem><ComboBoxItem Tag="SimHei">黑体</ComboBoxItem><ComboBoxItem Tag="SimSun">宋体</ComboBoxItem><ComboBoxItem Tag="KaiTi">楷体</ComboBoxItem><ComboBoxItem Tag="Arial">Arial</ComboBoxItem></ComboBox>
+                                                <Grid Width="130" Margin="0,0,8,8"><TextBox x:Name="FontSearchBox" TextChanged="FontSearch_TextChanged" AutomationProperties.Name="筛选字幕字体" ToolTip="输入中文或英文字体名，筛选旁边的字体列表"/><TextBlock x:Name="FontSearchPlaceholder" Text="筛选字体" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="10,0" IsHitTestVisible="False"/></Grid>
+                                                <ComboBox x:Name="FontSizeBox" Width="100" Margin="0,0,8,8" SelectedValuePath="Tag" SelectionChanged="BurnStyle_Changed"><ComboBoxItem Tag="14">14 号</ComboBoxItem><ComboBoxItem Tag="18">18 号</ComboBoxItem><ComboBoxItem Tag="24">24 号</ComboBoxItem><ComboBoxItem Tag="32">32 号</ComboBoxItem><ComboBoxItem Tag="44">44 号</ComboBoxItem></ComboBox>
+                                                 <ComboBox x:Name="SubtitlePositionBox" Width="120" Margin="0,0,8,8" SelectedValuePath="Tag" SelectionChanged="BurnStyle_Changed"><ComboBoxItem Tag="bottom">底部居中</ComboBoxItem><ComboBoxItem Tag="middle">画面中部</ComboBoxItem><ComboBoxItem Tag="top">顶部居中</ComboBoxItem></ComboBox>
+                                                 <Button Content="还原位置" Style="{StaticResource GhostButton}" Height="30" Margin="0,0,8,8" Click="ResetSubtitlePosition_Click" AutomationProperties.Name="还原字幕默认位置"/>
+                                             </WrapPanel>
+                                             <WrapPanel Margin="0,5,0,0">
+                                                 <TextBlock Text="字幕颜色" Width="125" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                                                 <ComboBox x:Name="SubtitleColorBox" Width="120" Margin="0,0,8,0" SelectedValuePath="Tag" SelectionChanged="BurnStyle_Changed"><ComboBoxItem Tag="#FFFFFF">白色</ComboBoxItem><ComboBoxItem Tag="#FFD54F">金色</ComboBoxItem><ComboBoxItem Tag="#78D5FF">浅蓝</ComboBoxItem><ComboBoxItem Tag="#92E6A7">薄荷绿</ComboBoxItem><ComboBoxItem Tag="#FF9CB4">浅粉</ComboBoxItem><ComboBoxItem Tag="custom">自定义</ComboBoxItem></ComboBox>
+                                                 <TextBox x:Name="SubtitleCustomColorBox" Width="105" Text="#FFFFFF" MaxLength="7" LostFocus="BurnColor_LostFocus" ToolTip="输入 #RRGGBB 十六进制色值" Visibility="Collapsed"/>
+                                             </WrapPanel>
+                                             <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="125"/><ColumnDefinition Width="220"/><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="垂直偏移" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/><Slider x:Name="VerticalOffsetSlider" Grid.Column="1" Minimum="-120" Maximum="120" TickFrequency="5" IsSnapToTickEnabled="True" ValueChanged="VerticalOffsetSlider_ValueChanged" AutomationProperties.Name="字幕垂直偏移"/><TextBlock x:Name="VerticalOffsetValue" Grid.Column="2" Text="0" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="3" Text="负值向上，正值向下" Style="{StaticResource Caption}" VerticalAlignment="Center"/></Grid>
+                                             <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="125"/><ColumnDefinition Width="220"/><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="黑色描边" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/><Slider x:Name="OutlineSlider" Grid.Column="1" Minimum="0" Maximum="8" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OutlineSlider_ValueChanged"/><TextBlock x:Name="OutlineValue" Grid.Column="2" Text="1" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="3" Text="0 = 无描边，预览会实时刷新" Style="{StaticResource Caption}" VerticalAlignment="Center"/></Grid>
+                                              <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="125"/><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="效果预览" Foreground="{DynamicResource MutedBrush}"/><Border x:Name="SubtitlePreviewSurface" Grid.Column="1" Width="250" Height="141" Background="#101722" CornerRadius="8" ClipToBounds="True" Cursor="SizeAll" ToolTip="按住鼠标拖动，调整字幕位置" PreviewMouseLeftButtonDown="SubtitlePreview_MouseDown" PreviewMouseMove="SubtitlePreview_MouseMove" PreviewMouseLeftButtonUp="SubtitlePreview_MouseUp" LostMouseCapture="SubtitlePreview_LostCapture"><Grid><TextBlock Text="字幕预览" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Image x:Name="SubtitlePreviewImage" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/><Canvas x:Name="SubtitleDragOverlay" IsHitTestVisible="False"><Ellipse x:Name="SubtitleDragMarker" Width="14" Height="14" Fill="{DynamicResource AccentSoftBrush}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.5" Visibility="Collapsed"/></Canvas></Grid></Border><TextBlock Grid.Column="2" Text="拖动画面选择字幕位置；软字幕外观由播放器决定。" Style="{StaticResource Caption}" Margin="14,0,0,0" TextWrapping="Wrap"/></Grid>
+                                             </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SectionCard}">
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="125"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="输出目录" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/><TextBox x:Name="OutputPathBox" Grid.Column="1" LostFocus="OutputPathBox_LostFocus"/><Button Grid.Column="2" Style="{StaticResource GhostButton}" Margin="9,0,0,0" Click="BrowseOutput_Click" AutomationProperties.Name="浏览"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconFolder}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="浏览" VerticalAlignment="Center"/></StackPanel></Button></Grid>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                            </Grid>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Grid x:Name="QueueView" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,15" LastChildFill="False"><TextBlock x:Name="QueueCountText" Text="进行中 0 · 共 0 个任务" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/><Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Click="Refresh_Click" AutomationProperties.Name="刷新"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconRefresh}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="刷新" VerticalAlignment="Center"/></StackPanel></Button></DockPanel>
+                        <Grid Grid.Row="1">
+                            <StackPanel x:Name="QueueEmpty" HorizontalAlignment="Center" VerticalAlignment="Center"><Viewbox Width="38" Height="38" HorizontalAlignment="Center" VerticalAlignment="Center"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconDownload}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="队列空空如也" Style="{StaticResource Heading}" Margin="0,10,0,0" HorizontalAlignment="Center"/><TextBlock Text="去解析一个链接，任务会出现在这里" Style="{StaticResource Caption}" Margin="0,6,0,13"/><Button Style="{StaticResource GhostButton}" Content="去解析" Tag="parse" Click="Nav_Click" HorizontalAlignment="Center"/></StackPanel>
+                            <ListView x:Name="QueueList" ItemsSource="{Binding QueueTasks}" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource SectionCard}" Padding="18">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding StatusText}" Foreground="{DynamicResource AccentBrush}" Margin="14,0,0,0"/><TextBlock Text="{Binding DisplayTitle}" Foreground="{DynamicResource TextBrush}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/></DockPanel>
+                                                    <ItemsControl ItemsSource="{Binding StageViews}" ItemTemplate="{StaticResource StageTemplate}" Margin="0,12,0,10"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
+                                                    <DockPanel Margin="0,0,0,7"><TextBlock DockPanel.Dock="Right" Text="{Binding ProgressPercent}" Foreground="{DynamicResource AccentBrush}" FontFamily="{DynamicResource MonoFont}" FontSize="15" FontWeight="SemiBold"/><TextBlock Text="{Binding StageText}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12" VerticalAlignment="Bottom"/></DockPanel>
+                                                    <ProgressBar Value="{Binding ProgressValue, Mode=OneWay}" Maximum="100" Style="{StaticResource QueueProgressBar}" AutomationProperties.Name="任务进度"/>
+                                                    <TextBlock Text="{Binding DetailText}" Style="{StaticResource Caption}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Style="{StaticResource DangerButton}" Content="取消" Tag="{Binding Id}" Click="Cancel_Click" Margin="16,0,0,0" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Grid>
+
+                    <Grid x:Name="DoneView" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,15" LastChildFill="False"><TextBlock x:Name="DoneCountText" Text="共 0 条记录" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/><Button DockPanel.Dock="Right" Style="{StaticResource DangerButton}" Click="ClearDone_Click" AutomationProperties.Name="清空记录"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconTrash}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="清空记录" VerticalAlignment="Center"/></StackPanel></Button></DockPanel>
+                        <Grid Grid.Row="1">
+                            <StackPanel x:Name="DoneEmpty" HorizontalAlignment="Center" VerticalAlignment="Center"><Viewbox Width="38" Height="38" HorizontalAlignment="Center" VerticalAlignment="Center"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconCheck}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="还没有完成的下载" Style="{StaticResource Heading}" Margin="0,10,0,0"/><TextBlock Text="完成的任务会在这里等着你" Style="{StaticResource Caption}" Margin="0,6,0,0"/></StackPanel>
+                            <ListView x:Name="DoneList" ItemsSource="{Binding DoneTasks}" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource SectionCard}" Padding="18">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <Border Width="44" Height="44" CornerRadius="10" Background="{DynamicResource AccentSoftBrush}" VerticalAlignment="Top"><Viewbox Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconCheck}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox></Border>
+                                                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                                    <DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding StatusText}" Foreground="{DynamicResource AccentBrush}" Margin="12,0,0,0"/><TextBlock Text="{Binding DisplayTitle}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/></DockPanel>
+                                                    <TextBlock Text="{Binding OutputMeta}" Style="{StaticResource Caption}" FontFamily="{DynamicResource MonoFont}" Margin="0,5,0,0"/>
+                                                    <TextBlock Text="{Binding ErrorText}" Foreground="#FF9CA8" FontSize="12" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                                    <ItemsControl ItemsSource="{Binding EditableSubtitles}" Margin="0,10,0,0" Visibility="{Binding HasEditableSubtitles, Converter={StaticResource BoolToVisibility}}">
+                                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Button Content="{Binding EditText}" Tag="{Binding}" Click="Artifact_Click"
+                                                                        Style="{StaticResource GhostButton}" Margin="0,0,8,6" Padding="10,6"
+                                                                        ToolTip="修正字幕后，可保存并重新生成带字幕视频" AutomationProperties.Name="{Binding EditText}"/>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Top">
+                                                    <Button Style="{StaticResource IconButton}" ToolTip="重试任务" Tag="{Binding Id}" Click="Retry_Click" Visibility="{Binding CanRetry, Converter={StaticResource BoolToVisibility}}" AutomationProperties.Name="重试任务"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconRefresh}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox></StackPanel></Button>
+                                                    <Button Style="{StaticResource IconButton}" ToolTip="打开视频所在文件夹" Tag="{Binding Id}" Click="Reveal_Click" Margin="6,0,0,0" Visibility="{Binding CanReveal, Converter={StaticResource BoolToVisibility}}" AutomationProperties.Name="打开视频所在文件夹"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconFolder}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox></StackPanel></Button>
+                                                    <Button Style="{StaticResource DangerButton}" ToolTip="删除记录" Tag="{Binding}" Click="DeleteOne_Click" Margin="6,0,0,0" Padding="9,6" AutomationProperties.Name="删除记录"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconTrash}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox></StackPanel></Button>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Grid>
+
+                    <Grid x:Name="SettingsView" Visibility="Collapsed">
+                        <ScrollViewer x:Name="SettingsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
+                            <StackPanel x:Name="SettingsContent" MaxWidth="860" HorizontalAlignment="Stretch">
+                                <StackPanel.Resources><Style TargetType="Expander" BasedOn="{StaticResource SettingsDetailExpander}"/></StackPanel.Resources>
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="SettingsSaveStatus" Text="修改后自动保存；输入完成后可点击保存" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <Button x:Name="SaveSettingsButton" Grid.Column="1" Style="{StaticResource GhostButton}" Content="保存设置" Click="SaveSettings_Click"/>
+                                </Grid>
+                                <Border Style="{StaticResource SettingCard}">
+                                    <StackPanel>
+                                        <DockPanel><Viewbox Width="17" Height="17" Margin="0,0,9,14"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconDownload}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock Text="常用" Style="{StaticResource SettingHeading}"/></DockPanel>
+                                        <Grid Style="{StaticResource SettingRow}" Margin="0,7" MinHeight="36"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="保存位置" Style="{StaticResource SettingLabel}"/><TextBlock x:Name="SettingsPathText" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><Button Grid.Column="1" Style="{StaticResource GhostButton}" Content="修改" Click="BrowseSettingsOutput_Click"/></Grid>
+                                        <Grid Style="{StaticResource SettingRow}" Margin="0,7" MinHeight="36"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="170"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="同时下载数" Style="{StaticResource SettingLabel}"/><TextBlock x:Name="ConcurrencyLabel" Text="最多 2 个任务并行" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><Slider x:Name="ConcurrencySlider" Grid.Column="1" Minimum="1" Maximum="4" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="ConcurrencySlider_ValueChanged"/></Grid>
+                                        <Grid Style="{StaticResource SettingRow}" Margin="0,7" MinHeight="36"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="完成后通知" Style="{StaticResource SettingLabel}"/><TextBlock x:Name="NotifyStatusText" Text="软件内提示与 Windows 系统通知" Style="{StaticResource Caption}" Margin="0,3,20,0"/></StackPanel><CheckBox x:Name="NotifyCheck" Grid.Column="1" Style="{StaticResource SwitchCheckBox}" Click="UiOption_Changed"/></Grid>
+                                        <Grid Style="{StaticResource SettingLastRow}" Margin="0,7" MinHeight="36"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="主题" Style="{StaticResource SettingLabel}"/></StackPanel><Grid Grid.Column="1"><ComboBox x:Name="ThemeBox" Visibility="Collapsed" SelectedValuePath="Tag" SelectionChanged="Theme_Changed"><ComboBoxItem Tag="dark">深色</ComboBoxItem><ComboBoxItem Tag="light">明亮</ComboBoxItem><ComboBoxItem Tag="auto">跟随系统</ComboBoxItem></ComboBox><Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="3"><StackPanel Orientation="Horizontal"><Button x:Name="ThemeDarkButton" Style="{StaticResource SegmentButton}" Tag="dark" Content="深色" Click="ThemeButton_Click"/><Button x:Name="ThemeLightButton" Style="{StaticResource SegmentButton}" Tag="light" Content="明亮" Click="ThemeButton_Click"/><Button x:Name="ThemeAutoButton" Style="{StaticResource SegmentButton}" Tag="auto" Content="跟随系统" Click="ThemeButton_Click"/></StackPanel></Border></Grid></Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Expander x:Name="SpeechSettings" Style="{StaticResource SettingsGroupExpander}" IsExpanded="False" FontSize="15" AutomationProperties.Name="语音与翻译设置">
+                                    <Expander.Header><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Viewbox Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center"><Path Data="{StaticResource IconLanguage}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Viewbox><StackPanel Grid.Column="1"><TextBlock Text="语音与翻译" FontWeight="Medium"/><TextBlock x:Name="SpeechSettingsSummary" Text="本地离线 · small · 翻译关闭" Style="{StaticResource Caption}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,3,0,0"/></StackPanel></Grid></Expander.Header>
+                                    <StackPanel>
+                                <Border Style="{StaticResource SettingsGroupBody}">
+                                    <StackPanel>
+                                        <TextBlock Text="语音识别" Style="{StaticResource SettingHeading}"/>
+                                        <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="识别方式" Style="{StaticResource SettingLabel}"/><TextBlock Text="本地离线模型 / 云端 ASR 接口" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><ComboBox x:Name="AsrProviderSettingsBox" Grid.Column="1" SelectedValuePath="Tag" SelectionChanged="SettingsConfig_Changed"><ComboBoxItem Tag="faster-whisper">本地离线</ComboBoxItem><ComboBoxItem Tag="cloud">云端 API</ComboBoxItem></ComboBox></Grid>
+                                        <Grid x:Name="WhisperSettingsRow" Style="{StaticResource SettingRow}">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <StackPanel><TextBlock Text="识别模型" Style="{StaticResource SettingLabel}"/><TextBlock Text="首次使用时下载；已有模型可继续使用" Style="{StaticResource Caption}" Margin="0,2,0,0"/><TextBlock x:Name="WhisperStatusText" Style="{StaticResource Caption}" Foreground="{DynamicResource AccentBrush}" Margin="0,6,0,0"/><ProgressBar x:Name="WhisperProgress" Height="5" Maximum="100" Visibility="Collapsed" Margin="0,7,0,0"/></StackPanel>
+                                            <Grid Grid.Row="1" Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <ComboBox x:Name="WhisperSettingsBox" MaxWidth="220" HorizontalAlignment="Stretch" SelectedValuePath="Tag" SelectionChanged="WhisperModel_Changed"><ComboBoxItem Tag="tiny">tiny（最快）</ComboBoxItem><ComboBoxItem Tag="base">base（轻量）</ComboBoxItem><ComboBoxItem Tag="small">small（均衡）</ComboBoxItem><ComboBoxItem Tag="medium">medium（较准确）</ComboBoxItem><ComboBoxItem Tag="large-v3">large-v3（最准确）</ComboBoxItem></ComboBox>
+                                                <Button x:Name="DownloadWhisperButton" Grid.Column="1" Style="{StaticResource GhostButton}" Content="下载模型" Click="DownloadWhisper_Click" Margin="12,0,0,0"/>
+                                            </Grid>
+                                        </Grid>
+                                        <Expander x:Name="GpuAdvancedSettings" Header="可选 · NVIDIA GPU 加速" IsExpanded="False" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="13" Margin="0,4,0,8">
+                                            <Grid x:Name="GpuSettingsRow" Style="{StaticResource SettingLastRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="GpuStatusText" Text="CPU 可直接使用；NVIDIA GPU 组件按需下载" Style="{StaticResource Caption}" Margin="0,2,12,0"/><ProgressBar x:Name="GpuProgress" Height="5" Maximum="100" Visibility="Collapsed" Margin="0,7,20,0"/></StackPanel><Button x:Name="DownloadGpuButton" Grid.Column="1" Style="{StaticResource GhostButton}" Content="下载 GPU 组件" Click="DownloadGpu_Click" Margin="8,0,0,0"/></Grid>
+                                        </Expander>
+                                        <StackPanel x:Name="AsrCloudSettings" Visibility="Collapsed">
+                                            <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="识别厂商" Style="{StaticResource SettingLabel}"/><TextBlock Text="选择后自动填入接口地址与模型" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><ComboBox x:Name="AsrVendorSettingsBox" Grid.Column="1" SelectedValuePath="Tag" SelectionChanged="SettingsAsrVendor_Changed"><ComboBoxItem Tag="openai">OpenAI</ComboBoxItem><ComboBoxItem Tag="siliconflow">硅基流动</ComboBoxItem><ComboBoxItem Tag="zhipu">智谱 GLM</ComboBoxItem><ComboBoxItem Tag="custom">自定义</ComboBoxItem></ComboBox></Grid>
+                                            <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions><TextBlock Text="识别凭证" Style="{StaticResource SettingLabel}"/><PasswordBox x:Name="AsrKeySettingsBox" Grid.Column="1" ToolTip="API Key，留空保持现有值" LostFocus="SettingsTextConfig_Changed"/></Grid>
+                                            <Expander Header="接口与模型" IsExpanded="False" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,4,0,8">
+                                                <StackPanel>
+                                            <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="接口地址" Style="{StaticResource SettingLabel}"/><TextBlock Text="OpenAI 兼容的 /audio/transcriptions 接口" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><TextBox x:Name="AsrBaseSettingsBox" Grid.Column="1" ToolTip="接口地址" LostFocus="SettingsTextConfig_Changed"/></Grid>
+                                                    <Grid Style="{StaticResource SettingLastRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions><TextBlock Text="模型" Style="{StaticResource SettingLabel}"/><TextBox x:Name="AsrModelSettingsBox" Grid.Column="1" ToolTip="模型名" LostFocus="SettingsTextConfig_Changed"/></Grid>
+                                                </StackPanel>
+                                            </Expander>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource SettingsGroupBody}" Margin="0">
+                                    <StackPanel>
+                                        <TextBlock Text="字幕翻译" Style="{StaticResource SettingHeading}"/>
+                                        <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="字幕翻译" Style="{StaticResource SettingLabel}"/><TextBlock Text="AI 自动理解视频语境并翻译选中语言" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><ComboBox x:Name="TranslationSettingsBox" Grid.Column="1" SelectedValuePath="Tag" SelectionChanged="SettingsConfig_Changed"><ComboBoxItem Tag="null">关闭（仅源语言）</ComboBoxItem><ComboBoxItem Tag="llm">开启翻译</ComboBoxItem></ComboBox></Grid>
+                                        <StackPanel x:Name="LlmCloudSettings" Visibility="Collapsed">
+                                            <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="翻译厂商" Style="{StaticResource SettingLabel}"/><TextBlock Text="deepseek / OpenAI / GLM 等 OpenAI 兼容接口" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><ComboBox x:Name="LlmVendorSettingsBox" Grid.Column="1" SelectedValuePath="Tag" SelectionChanged="SettingsLlmVendor_Changed"><ComboBoxItem Tag="deepseek">deepseek</ComboBoxItem><ComboBoxItem Tag="openai">OpenAI</ComboBoxItem><ComboBoxItem Tag="siliconflow">硅基流动</ComboBoxItem><ComboBoxItem Tag="zhipu">智谱 GLM</ComboBoxItem><ComboBoxItem Tag="custom">自定义</ComboBoxItem></ComboBox></Grid>
+                                            <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions><TextBlock Text="翻译凭证" Style="{StaticResource SettingLabel}"/><PasswordBox x:Name="LlmKeySettingsBox" Grid.Column="1" ToolTip="API Key，留空保持现有值" LostFocus="SettingsTextConfig_Changed"/></Grid>
+                                            <Expander Header="接口与模型" IsExpanded="False" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,4,0,8">
+                                                <StackPanel>
+                                            <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="接口地址" Style="{StaticResource SettingLabel}"/><TextBlock Text="OpenAI 兼容的 /chat/completions 接口地址" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><TextBox x:Name="LlmBaseSettingsBox" Grid.Column="1" ToolTip="接口地址" LostFocus="SettingsTextConfig_Changed"/></Grid>
+                                                    <Grid Style="{StaticResource SettingLastRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions><TextBlock Text="模型" Style="{StaticResource SettingLabel}"/><TextBox x:Name="LlmModelSettingsBox" Grid.Column="1" ToolTip="模型名" LostFocus="SettingsTextConfig_Changed"/></Grid>
+                                                </StackPanel>
+                                            </Expander>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                                </StackPanel></Expander>
+
+                                <Expander x:Name="AdvancedSettings" Style="{StaticResource SettingsGroupExpander}" IsExpanded="False" FontSize="15" AutomationProperties.Name="高级设置">
+                                    <Expander.Header><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Viewbox Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center"><Path Data="{StaticResource IconSettings}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Viewbox><StackPanel Grid.Column="1"><TextBlock Text="高级" FontWeight="Medium"/><TextBlock Text="网络、外观与更新" Style="{StaticResource Caption}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,3,0,0"/></StackPanel></Grid></Expander.Header>
+                                    <StackPanel>
+                                <Border Style="{StaticResource SettingsGroupBody}">
+                                    <StackPanel>
+                                        <DockPanel><Viewbox Width="17" Height="17" Margin="0,0,9,14"><Canvas Width="24" Height="24"><Path Data="M3,12 A9,9 0 1 0 21,12 A9,9 0 1 0 3,12 M3.6,9 L20.4,9 M3.6,15 L20.4,15 M12,3 C17,8 17,16 12,21" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock Text="网络与加速" Style="{StaticResource SettingHeading}"/></DockPanel>
+                                        <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="代理" Style="{StaticResource SettingLabel}"/><TextBlock Text="下载慢优先试「直连」，系统代理常常是慢的根源" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><ComboBox x:Name="ProxyModeBox" Width="180" SelectedValuePath="Tag" SelectionChanged="SettingsConfig_Changed"><ComboBoxItem Tag="system">跟随系统</ComboBoxItem><ComboBoxItem Tag="direct">直连</ComboBoxItem><ComboBoxItem Tag="custom">自定义</ComboBoxItem></ComboBox><TextBox x:Name="CustomProxyBox" Width="170" Margin="8,0,0,0" ToolTip="http://127.0.0.1:7890" LostFocus="SettingsTextConfig_Changed"/></StackPanel></Grid>
+                                        <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="aria2c 多线程" Style="{StaticResource SettingLabel}"/><TextBlock Text="直链大文件 16 连接加速" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><CheckBox x:Name="AriaCheck" Grid.Column="1" Style="{StaticResource SwitchCheckBox}" Click="SettingsConfig_Changed"/></Grid>
+                                        <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="76"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="分段并发" Style="{StaticResource SettingLabel}"/><TextBlock Text="B站 / YouTube 分段流的并发线程数" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><TextBox x:Name="FragmentsBox" Grid.Column="1" Text="16" LostFocus="SettingsTextConfig_Changed"/></Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource SettingsGroupBody}">
+                                    <StackPanel>
+                                        <DockPanel><Viewbox Width="17" Height="17" Margin="0,0,9,14"><Canvas Width="24" Height="24"><Path Data="M3,12 A9,9 0 1 0 21,12 A9,9 0 1 0 3,12 M12,9 L12.01,9 M11,12 L12,12 L12,16 L13,16" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock Text="外观与行为" Style="{StaticResource SettingHeading}"/></DockPanel>
+                                        <Grid Style="{StaticResource SettingRow}" Margin="0,12,0,12" MinHeight="34"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="自动解析剪贴板" Style="{StaticResource SettingLabel}"/></StackPanel><CheckBox x:Name="AutoParseCheck" Grid.Column="1" Style="{StaticResource SwitchCheckBox}" Click="UiOption_Changed"/></Grid>
+                                        <Grid Style="{StaticResource SettingRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="强调色" Style="{StaticResource SettingLabel}"/><TextBlock Text="贯穿界面的唯一主题色" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="AccentIconButton" Style="{StaticResource SwatchButton}" Margin="0,0,10,0" Background="#3050F0" Tag="icon" Click="Accent_Click" ToolTip="即影蓝"/><Button x:Name="AccentJadeButton" Style="{StaticResource SwatchButton}" Margin="0,0,10,0" Background="#68D5B5" Tag="jade" Click="Accent_Click" ToolTip="玉青"/><Button x:Name="AccentAmberButton" Style="{StaticResource SwatchButton}" Margin="0,0,10,0" Background="#E4A451" Tag="amber" Click="Accent_Click" ToolTip="蜜橙"/><Button x:Name="AccentIrisButton" Style="{StaticResource SwatchButton}" Background="#8CA8DC" Tag="iris" Click="Accent_Click" ToolTip="雾蓝"/></StackPanel></Grid>
+                                        <Grid Style="{StaticResource SettingLastRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="170"/><ColumnDefinition Width="55"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="背景透明度" Style="{StaticResource SettingLabel}"/><TextBlock Text="向左更通透、透出桌面，向右背板与雾彩更浓" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel><Slider x:Name="BackgroundOpacitySlider" Grid.Column="1" Minimum="40" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True" ValueChanged="BackgroundOpacity_ValueChanged"/><TextBlock x:Name="BackgroundOpacityText" Grid.Column="2" Text="100%" Foreground="{DynamicResource MutedBrush}" FontFamily="{DynamicResource MonoFont}" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource SettingsGroupBody}" Margin="0">
+                                    <StackPanel>
+                                        <DockPanel><Viewbox Width="17" Height="17" Margin="0,0,9,14"><Canvas Width="24" Height="24"><Path Data="M12,18 L6.657,18 C4.085,18 2,15.993 2,13.517 C2,11.042 4.085,9.035 6.657,9.035 C7.05,7.273 8.451,5.835 10.332,5.262 C12.212,4.69 14.288,5.069 15.776,6.262 C17.264,7.452 17.938,9.269 17.546,11.031 L18.536,11.031 C19.916,11.031 21.109,11.844 21.666,13.021 M19,16 L19,22 M22,19 L19,22 L16,19" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Canvas></Viewbox><TextBlock Text="解析引擎" Style="{StaticResource SettingHeading}"/></DockPanel>
+                                        <Grid Style="{StaticResource SettingLastRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="跟随上游解析项目自动更新" Style="{StaticResource SettingLabel}"/><TextBlock Text="检查 yt-dlp 官方 GitHub 发布；校验通过后在下载空闲时生效" Style="{StaticResource Caption}" Margin="0,2,0,0"/><TextBlock x:Name="YtDlpStatusText" Text="自动更新已开启 · 正在读取版本" Style="{StaticResource Caption}" Margin="0,3,0,0"/></StackPanel><Button x:Name="YtDlpCheckButton" Grid.Column="1" Style="{StaticResource GhostButton}" Click="YtDlpCheck_Click" AutomationProperties.Name="检查更新"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconRefresh}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock x:Name="YtDlpCheckLabel" Text="检查更新" VerticalAlignment="Center"/></StackPanel></Button></Grid>
+                                    </StackPanel>
+                                </Border>
+                                </StackPanel></Expander>
+
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <Image x:Name="ThemeTransitionLayer" Panel.ZIndex="200" Stretch="Fill" Visibility="Collapsed" IsHitTestVisible="False"/>
+        <Border x:Name="WindowDragSurface" Panel.ZIndex="35" Height="48" VerticalAlignment="Top" Background="#01000000" IsHitTestVisible="False"/>
+
+        <StackPanel x:Name="WindowControls" Panel.ZIndex="160" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,16,16,0" MouseEnter="WindowControls_MouseEnter" MouseLeave="WindowControls_MouseLeave" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+            <Button x:Name="WMin" Style="{StaticResource WindowDotButton}" Width="20" Height="20" ToolTip="最小化" Click="WindowMin_Click" AutomationProperties.Name="最小化">
+                <Grid><Ellipse x:Name="WMinDot" Width="12" Height="12" Fill="#FEBC2E"/><TextBlock x:Name="WMinGlyph" Text="−" Foreground="#D6161616" FontWeight="Bold" FontSize="10" Opacity="0" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/></Grid>
+            </Button>
+            <Button x:Name="WMax" Style="{StaticResource WindowDotButton}" Width="20" Height="20" ToolTip="最大化 / 还原" Click="WindowMax_Click" Margin="8,0,0,0" AutomationProperties.Name="最大化 / 还原">
+                <Grid><Ellipse x:Name="WMaxDot" Width="12" Height="12" Fill="#28C840"/><TextBlock x:Name="WMaxGlyph" Text="↗" Foreground="#D6161616" FontWeight="Bold" FontSize="9" Opacity="0" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+            </Button>
+            <Button x:Name="WClose" Style="{StaticResource WindowDotButton}" Width="20" Height="20" ToolTip="关闭" Click="WindowClose_Click" Margin="8,0,0,0" AutomationProperties.Name="关闭">
+                <Grid><Ellipse x:Name="WCloseDot" Width="12" Height="12" Fill="#FF5F57"/><TextBlock x:Name="WCloseGlyph" Text="×" Foreground="#D6161616" FontWeight="Bold" FontSize="10" Opacity="0" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+            </Button>
+        </StackPanel>
+
+        <StackPanel x:Name="ToastHost" Panel.ZIndex="210" Width="360" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,22,22"/>
+
+        <Grid x:Name="ModalOverlay" Panel.ZIndex="120" Visibility="Collapsed" Background="#8C06090E">
+            <Grid.Resources><SolidColorBrush x:Key="CardBrush" Color="#FF20252E"/></Grid.Resources>
+            <Border x:Name="DirectoryDialog" Visibility="Collapsed" Width="560" MaxHeight="620" Style="{StaticResource SectionCard}" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="22">
+                <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><DockPanel><Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseModal_Click" AutomationProperties.Name="关闭"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconClose}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox></StackPanel></Button><TextBlock Text="选择输出目录" Style="{StaticResource Heading}" VerticalAlignment="Center"/></DockPanel><WrapPanel x:Name="DrivePanel" Grid.Row="1" Margin="0,14,0,7"/><TextBlock x:Name="DirectoryCurrentText" Grid.Row="2" Style="{StaticResource Caption}" FontFamily="{DynamicResource MonoFont}" TextWrapping="Wrap"/><ListBox x:Name="DirectoryListBox" Grid.Row="3" Margin="0,12,0,12" MinHeight="260" Background="{DynamicResource InputBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" MouseDoubleClick="DirectoryList_DoubleClick"><ListBox.ItemTemplate><DataTemplate><Border Padding="11,8" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,9,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconFolder}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextBrush}"/></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox><DockPanel Grid.Row="4"><StackPanel Orientation="Horizontal"><Button x:Name="DirectoryUpButton" Style="{StaticResource GhostButton}" Click="DirectoryUp_Click" AutomationProperties.Name="上一级"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconBack}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="上一级" VerticalAlignment="Center"/></StackPanel></Button><Button Style="{StaticResource GhostButton}" Click="DirectoryHome_Click" Margin="7,0,0,0" AutomationProperties.Name="主目录"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconHome}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="主目录" VerticalAlignment="Center"/></StackPanel></Button></StackPanel><Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Click="DirectoryAccept_Click" AutomationProperties.Name="选择此目录"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconTick}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock Text="选择此目录" VerticalAlignment="Center"/></StackPanel></Button></DockPanel></Grid>
+            </Border>
+
+            <Border x:Name="SubtitleDialog" Visibility="Collapsed" Width="940" MaxHeight="650" Margin="24"
+                    MaxWidth="{Binding ActualWidth, ElementName=ModalOverlay}" Background="{DynamicResource DialogBrush}" Style="{StaticResource SectionCard}" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="22">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <DockPanel>
+                        <Button x:Name="SubtitleCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseModal_Click" AutomationProperties.Name="关闭字幕编辑器">
+                            <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconClose}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox>
+                        </Button>
+                        <TextBlock x:Name="SubtitleDialogTitle" Text="修改字幕" Style="{StaticResource Heading}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <TextBlock x:Name="SubtitleEditorDescription" Grid.Row="1" Text="直接点击文字修改，时间轴自动保留。重新生成会复用已下载的视频。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    <DataGrid x:Name="SubtitleRows" Grid.Row="2" Margin="0,14,0,12" MinHeight="250" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                              CanUserSortColumns="False" CanUserReorderColumns="False" HeadersVisibility="Column" GridLinesVisibility="None" BorderThickness="0"
+                              Background="Transparent" Foreground="{DynamicResource TextBrush}" EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="逐条字幕编辑">
+                        <DataGrid.Resources>
+                            <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="Padding" Value="10,9"/><Setter Property="BorderThickness" Value="0"/><Setter Property="FontSize" Value="12"/></Style>
+                            <Style TargetType="DataGridRow"><Setter Property="Background" Value="Transparent"/><Setter Property="MinHeight" Value="56"/></Style>
+                            <Style TargetType="DataGridCell"><Setter Property="BorderThickness" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
+                        </DataGrid.Resources>
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="时间" Width="112" IsReadOnly="True"><DataGridTemplateColumn.CellTemplate><DataTemplate>
+                                <StackPanel Margin="10,10"><TextBlock Text="{Binding Number}" FontSize="10" Foreground="{DynamicResource MutedBrush}"/>
+                                    <TextBlock Text="{Binding TimingDisplay}" FontFamily="{DynamicResource MonoFont}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                            <DataGridTemplateColumn x:Name="SubtitleReferenceColumn" Header="原文 · 对照" Width="*" IsReadOnly="True"><DataGridTemplateColumn.CellTemplate><DataTemplate>
+                                <TextBlock Text="{Binding ReferenceText}" TextWrapping="Wrap" FontSize="13" Margin="10,10" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                            </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                            <DataGridTemplateColumn x:Name="SubtitleEditColumn" Header="当前字幕 · 点击修改" Width="*"><DataGridTemplateColumn.CellTemplate><DataTemplate>
+                                <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SubtitleCueEditor}" AutomationProperties.Name="{Binding Number, StringFormat=修改第 {0} 条字幕}"/>
+                            </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <TextBox x:Name="SubtitleTextBox" Grid.Row="2" AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" FontFamily="{DynamicResource MonoFont}"
+                             FontSize="12.5" TextBlock.LineHeight="21.25" TextBlock.LineStackingStrategy="BlockLineHeight" Margin="0,14,0,12"
+                             MinHeight="180" AutomationProperties.Name="字幕内容"/>
+                    <WrapPanel Grid.Row="3">
+                        <Button x:Name="SubtitleSaveButton" Content="仅保存字幕" Style="{StaticResource GhostButton}" Click="SaveSubtitle_Click" Margin="0,0,8,0" AutomationProperties.Name="仅保存字幕"/>
+                        <Button x:Name="SubtitleRenderButton" Content="保存并重新生成视频" Style="{StaticResource PrimaryButton}" Click="RerenderSubtitle_Click" AutomationProperties.Name="保存并重新生成视频"/>
+                    </WrapPanel>
+                    <TextBlock x:Name="SubtitleHint" Grid.Row="4" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                </Grid>
+            </Border>
+
+            <Border x:Name="DeleteDialog" Visibility="Collapsed" Width="520" MaxHeight="560" Style="{StaticResource SectionCard}" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="22">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseModal_Click" AutomationProperties.Name="关闭"><TextBlock Text="×" FontSize="18"/></Button>
+                        <TextBlock x:Name="DeleteDialogTitle" Text="删除下载内容" Style="{StaticResource Heading}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <TextBlock x:Name="DeleteDescription" Grid.Row="1" Style="{StaticResource Caption}" Margin="0,12,0,14" TextWrapping="Wrap"/>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <RadioButton x:Name="DeleteSubtitleChoice" Grid.Column="0" GroupName="DeleteScope" Tag="subtitle" Style="{StaticResource DeleteChoice}" Checked="DeleteChoice_Changed" AutomationProperties.Name="只删除字幕"><StackPanel><TextBlock Text="字幕" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="SRT 文件" Style="{StaticResource Caption}" Margin="0,5,0,0"/></StackPanel></RadioButton>
+                        <RadioButton x:Name="DeleteVideoChoice" Grid.Column="1" GroupName="DeleteScope" Tag="video" Style="{StaticResource DeleteChoice}" Checked="DeleteChoice_Changed" AutomationProperties.Name="只删除视频"><StackPanel><TextBlock Text="视频" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="原片与成片" Style="{StaticResource Caption}" Margin="0,5,0,0"/></StackPanel></RadioButton>
+                        <RadioButton x:Name="DeleteAllChoice" Grid.Column="2" GroupName="DeleteScope" Tag="all" Style="{StaticResource DeleteChoice}" Margin="0" Checked="DeleteChoice_Changed" AutomationProperties.Name="删除全部和记录"><StackPanel><TextBlock Text="全部" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="文件与记录" Style="{StaticResource Caption}" Margin="0,5,0,0"/></StackPanel></RadioButton>
+                    </Grid>
+                    <DockPanel Grid.Row="3" Margin="0,18,0,0">
+                        <TextBlock x:Name="DeleteHint" Style="{StaticResource Caption}" VerticalAlignment="Center" MaxWidth="215"/>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Style="{StaticResource GhostButton}" Content="取消" Click="CloseModal_Click"/>
+                            <Button x:Name="ConfirmDeleteButton" Style="{StaticResource DangerButton}" Click="ConfirmDelete_Click" Margin="7,0,0,0" AutomationProperties.Name="确认删除"><StackPanel Orientation="Horizontal"><Viewbox Width="16" Height="16" Margin="0,0,7,0"><Canvas Width="24" Height="24"><Path Data="{StaticResource IconTrash}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox><TextBlock x:Name="ConfirmDeleteText" Text="删除全部" VerticalAlignment="Center"/></StackPanel></Button>
+                        </StackPanel>
+                    </DockPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
