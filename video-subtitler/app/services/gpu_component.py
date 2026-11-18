@@ -44,14 +44,31 @@ def _verified_runtime(directory, requirements, signature):
                for name, size, digest in requirements)
 
 
-def download_gpu_runtime(bundle: Path, cache: Path, on_progress=None, check_cancel=None) -> Path:
-    records, target = component_paths(bundle, cache)
+def _read_download_manifest(bundle: Path) -> dict:
     meta = json.loads((bundle / 'download.json').read_bytes())
+    if not isinstance(meta, dict) or not isinstance(meta.get('url'), str):
+        raise ValueError('GPU 组件下载清单无效')
     parsed = urlparse(meta['url'])
     if parsed.scheme != 'https' or parsed.hostname != 'files.pythonhosted.org' or parsed.username:
         raise ValueError('GPU 组件下载地址无效')
-    if type(meta['size']) is not int or meta['size'] <= 0 or len(meta['sha256']) != 64:
+    digest = meta.get('sha256')
+    if (type(meta.get('size')) is not int or meta['size'] <= 0
+            or not isinstance(digest, str) or len(digest) != 64
+            or any(char not in '0123456789abcdef' for char in digest)):
         raise ValueError('GPU 组件下载清单无效')
+    return meta
+
+
+def runtime_download_size(bundle: Path) -> int:
+    try:
+        return _read_download_manifest(bundle)['size']
+    except (OSError, ValueError):
+        return 0
+
+
+def download_gpu_runtime(bundle: Path, cache: Path, on_progress=None, check_cancel=None) -> Path:
+    records, target = component_paths(bundle, cache)
+    meta = _read_download_manifest(bundle)
     cache.mkdir(parents=True, exist_ok=True)
     def report(fraction, message):
         _check(check_cancel)

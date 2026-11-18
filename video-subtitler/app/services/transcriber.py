@@ -1,682 +1,38 @@
-"""语音识别 Provider：默认 faster-whisper（本地离线），接口可扩展云 API。"""
+"""本地 faster-whisper 与云端 ASR Provider。"""
 from __future__ import annotations
 
-import json
 import copy
-import fnmatch
-import hashlib
+import json
 import logging
 import math
-import os
 import re
-import tempfile
 import threading
 import time
-import unicodedata
-import wave
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from ..core.config import Config
 from ..core.errors import AppError, Codes, dep_missing
-from ..core.paths import bin_dir, data_dir
+from .speech_cuda import _add_nvidia_dll_dirs, _has_cuda
+from .speech_text import (
+    Segment, Transcript, _clip_audio_timing, _join_speech_tokens, _timed_audio_segments,
+    _timed_word_segments, _wav_duration, normalize_asr_language, valid_language_code, write_json_atomic,
+)
+from .whisper_models import (
+    WHISPER_FILES, _preparation_lock, download_whisper_model, local_whisper_model,
+    whisper_model_complete, whisper_progress_tqdm,
+)
+from . import model_maintenance
+
+__all__ = [
+    "CloudAsrTranscriber", "FasterWhisperTranscriber", "Segment", "Transcript", "TranscriberProvider",
+    "WHISPER_FILES", "build_transcriber", "download_whisper_model", "local_whisper_model",
+    "normalize_asr_language", "valid_language_code", "whisper_model_complete", "whisper_progress_tqdm",
+    "write_json_atomic", "_timed_word_segments",
+]
 
 log = logging.getLogger(__name__)
-
-WHISPER_FILES = ["config.json", "preprocessor_config.json", "model.bin",
-                 "tokenizer.json", "vocabulary.*"]
-_whisper_download_lock = threading.Lock()
-_cuda_dll_handles: dict[str, object] = {}
-_MODELSCOPE_WHISPER = ("tiny", "base", "small", "medium", "large-v3")
-
-
-def normalize_asr_language(value) -> str:
-    """云端可能返回语言全名或地区码，统一为安全的基础语言代码。"""
-    if not isinstance(value, str):
-        return 'unknown'
-    name = value.strip().casefold().replace('_', '-')
-    aliases = {
-        'english': 'en', 'eng': 'en', 'chinese': 'zh', 'mandarin': 'zh', '中文': 'zh',
-        'chi': 'zh', 'zho': 'zh', 'cmn': 'zh', 'cantonese': 'yue',
-        'japanese': 'ja', '日本語': 'ja', 'jpn': 'ja', 'korean': 'ko', '한국어': 'ko', 'kor': 'ko',
-        'spanish': 'es', 'español': 'es', 'spa': 'es', 'french': 'fr', 'français': 'fr', 'fra': 'fr', 'fre': 'fr',
-        'german': 'de', 'deutsch': 'de', 'deu': 'de', 'ger': 'de', 'russian': 'ru', 'rus': 'ru',
-        'portuguese': 'pt', 'por': 'pt', 'arabic': 'ar', 'ara': 'ar', 'thai': 'th', 'tha': 'th',
-        'vietnamese': 'vi', 'vie': 'vi', 'italian': 'it', 'ita': 'it', 'dutch': 'nl', 'nld': 'nl', 'dut': 'nl',
-        'hindi': 'hi', 'hin': 'hi', 'indonesian': 'id', 'ind': 'id', 'turkish': 'tr', 'tur': 'tr',
-        'hebrew': 'he', 'heb': 'he', 'malay': 'ms', 'polish': 'pl', 'ukrainian': 'uk',
-        'swedish': 'sv', 'danish': 'da', 'norwegian': 'no', 'finnish': 'fi', 'greek': 'el',
-        'czech': 'cs', 'romanian': 'ro', 'hungarian': 'hu', 'persian': 'fa', 'farsi': 'fa',
-        'bengali': 'bn', 'tamil': 'ta', 'telugu': 'te', 'urdu': 'ur', 'swahili': 'sw',
-    }
-    if name in aliases:
-        return aliases[name]
-    if re.fullmatch(r'[a-z]{2,3}(?:-[a-z0-9]{2,8})*', name):
-        return name.split('-')[0]
-    return 'unknown'
-
-
-def valid_language_code(value, allow_unknown=False) -> bool:
-    """语言字段会用于字幕文件名，仅允许语言代码和可选的未知语言标记。"""
-    return (isinstance(value, str) and len(value) <= 35
-            and (allow_unknown and value == 'unknown'
-                 or bool(re.fullmatch(r'[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*', value))))
-
-
-@contextmanager
-def _preparation_lock(lock, check_cancel=None, on_wait=None):
-    if check_cancel:
-        check_cancel()
-    while not lock.acquire(timeout=0.2):
-        if check_cancel:
-            check_cancel()
-        if on_wait:
-            on_wait()
-    try:
-        if check_cancel:
-            check_cancel()
-        yield
-    finally:
-        lock.release()
-
-
-def whisper_progress_tqdm(callback, check_cancel=None):
-    """共享模型字节进度；取消检查不得被普通 UI 回调容错吞掉。"""
-    from tqdm import tqdm
-
-    class _AggTqdm(tqdm):
-        _bars: dict[int, tuple[int, int, bool]] = {}
-        _lock = threading.Lock()
-        _fixed_total = 0
-        _next_bar = 0
-
-        @classmethod
-        def set_download_total(cls, total):
-            with cls._lock:
-                cls._bars.clear()
-                cls._fixed_total = int(total)
-
-        def __init__(self, *args, **kwargs):
-            self._bytes = kwargs.get("unit") == "B" and not str(
-                kwargs.get("desc", "")).startswith("Downloading")
-            kwargs.update(disable=False, leave=False)
-            super().__init__(*args, **kwargs)
-            with _AggTqdm._lock:
-                self._bar_id = _AggTqdm._next_bar
-                _AggTqdm._next_bar += 1
-                _AggTqdm._bars[self._bar_id] = (int(self.n), int(self.total or 0), self._bytes)
-            if check_cancel:
-                check_cancel()
-
-        def display(self, *args, **kwargs):
-            pass
-
-        def update(self, n=1):
-            if check_cancel:
-                check_cancel()
-            super().update(n)
-            if not self._bytes:
-                return
-            with _AggTqdm._lock:
-                _AggTqdm._bars[self._bar_id] = (int(self.n), int(self.total or 0), self._bytes)
-                bars = [v for v in _AggTqdm._bars.values() if v[2]]
-                done = sum(v for v, _, _ in bars)
-                total = _AggTqdm._fixed_total or sum(x for _, x, _ in bars)
-            if total > 0:
-                try:
-                    callback(min(done / total, 0.99))
-                except AppError as exc:
-                    if exc.code == Codes.TASK_CANCELLED:
-                        raise
-                except Exception:
-                    pass
-
-        def close(self):
-            super().close()
-            with _AggTqdm._lock:
-                _AggTqdm._bars[self._bar_id] = (int(self.n), int(self.total or 0), self._bytes)
-
-    return _AggTqdm
-
-
-def whisper_model_complete(path: Path | str, model: str | None = None) -> bool:
-    """缓存目录存在不代表下载完整；就绪还必须经过实际模型载入。"""
-    path = Path(path)
-    try:
-        required = [path / name for name in ("model.bin", "config.json", "tokenizer.json")]
-        vocabulary = list(path.glob("vocabulary.*"))
-        if not vocabulary or any(not f.is_file() or f.stat().st_size == 0
-                                 for f in required + vocabulary):
-            return False
-        for f in required[1:] + [v for v in vocabulary if v.suffix == ".json"]:
-            json.loads(f.read_text(encoding="utf-8"))
-        prep = path / "preprocessor_config.json"
-        large_v3 = model in ("large-v3", "Systran/faster-whisper-large-v3")
-        if large_v3 or prep.exists():
-            settings = json.loads(prep.read_text(encoding="utf-8"))
-            if not isinstance(settings, dict) or (large_v3 and settings.get("feature_size") != 128):
-                return False
-        return True
-    except (OSError, ValueError, UnicodeError):
-        return False
-
-
-def local_whisper_model(model: str) -> Path | None:
-    """只检查缓存文件，不提前导入 faster-whisper、CTranslate2 或音频运行库。"""
-    try:
-        from huggingface_hub import try_to_load_from_cache
-        if Path(model).is_dir():
-            path = Path(model)
-        else:
-            repo = model if '/' in model else {
-                'large': 'Systran/faster-whisper-large-v3',
-                'turbo': 'mobiuslabsgmbh/faster-whisper-large-v3-turbo',
-                'large-v3-turbo': 'mobiuslabsgmbh/faster-whisper-large-v3-turbo',
-                'distil-large-v3.5': 'distil-whisper/distil-large-v3.5-ct2',
-            }.get(model, 'Systran/faster-' + (model.replace('distil-', 'distil-whisper-', 1)
-                                           if model.startswith('distil-') else 'whisper-' + model))
-            cached = try_to_load_from_cache(repo, 'config.json')
-            if not isinstance(cached, str):
-                raise FileNotFoundError('模型未缓存')
-            path = Path(cached).parent
-        if whisper_model_complete(path, model):
-            return path
-    except Exception:
-        pass
-    if model in _MODELSCOPE_WHISPER:
-        path = _modelscope_model_path(model)
-        try:
-            sizes = json.loads((path / "download.json").read_text(encoding="utf-8"))
-            if (isinstance(sizes, dict)
-                    and {"model.bin", "config.json", "tokenizer.json"}.issubset(sizes)
-                    and all("/" not in name and "\\" not in name
-                            and (path / name).stat().st_size == size for name, size in sizes.items())
-                    and whisper_model_complete(path, model)):
-                return path
-        except (OSError, ValueError, UnicodeError, TypeError):
-            pass
-    return None
-
-
-def _whisper_proxy(config) -> str:
-    from urllib.request import getproxies
-
-    mode = config.get("download.proxy_mode", "system")
-    proxy = ""
-    if mode != "direct":
-        if mode == "custom":
-            proxy = str(config.get("download.custom_proxy", "") or "").strip()
-        proxy = proxy or str(config.get("proxy", "") or "").strip()
-        if not proxy:
-            proxies = getproxies()
-            proxy = proxies.get("https") or proxies.get("http") or ""
-    return proxy
-
-
-def _configure_whisper_http(config) -> None:
-    import httpx
-    import huggingface_hub
-    from huggingface_hub.utils._http import hf_request_event_hook
-    proxy = _whisper_proxy(config)
-    huggingface_hub.set_client_factory(lambda: httpx.Client(
-        proxy=proxy or None, trust_env=False, follow_redirects=True,
-        timeout=httpx.Timeout(30.0, connect=10.0),
-        event_hooks={"request": [hf_request_event_hook]}))
-
-
-def _modelscope_model_path(model: str) -> Path:
-    from huggingface_hub.constants import HF_HUB_CACHE
-    return Path(HF_HUB_CACHE) / "jiying-modelscope" / model
-
-
-def _model_file_hash(path: Path, check_cancel=None) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        while chunk := file.read(1024 * 1024):
-            if check_cancel:
-                check_cancel()
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _download_modelscope_file(session, repo: str, path: Path, info: dict,
-                              tqdm_class=None, check_cancel=None) -> None:
-    if check_cancel:
-        check_cancel()
-    name, size, expected = info["Path"], info["Size"], info["Sha256"].lower()
-    target = path / name
-    part = path / f"{name}.{expected[:12]}.part"
-    complete = target.is_file() and target.stat().st_size == size
-    if complete and _model_file_hash(target, check_cancel) == expected:
-        if tqdm_class:
-            with tqdm_class(total=size, initial=size, unit="B", desc=f"ModelScope {name}") as bar:
-                bar.update(0)
-        return
-    offset = part.stat().st_size if part.is_file() else 0
-    if offset == size and _model_file_hash(part, check_cancel) == expected:
-        part.replace(target)
-        if tqdm_class:
-            with tqdm_class(total=size, initial=size, unit="B", desc=f"ModelScope {name}") as bar:
-                bar.update(0)
-        return
-    if offset >= size:
-        offset = 0
-    digest = hashlib.sha256()
-    if offset:
-        with part.open("rb") as file:
-            while chunk := file.read(1024 * 1024):
-                if check_cancel:
-                    check_cancel()
-                digest.update(chunk)
-    headers = {"Range": f"bytes={offset}-"} if offset else {}
-    bar = tqdm_class(total=size, initial=offset, unit="B", desc=f"ModelScope {name}") if tqdm_class else None
-    try:
-        with session.get(f"https://modelscope.cn/api/v1/models/{repo}/repo",
-                         params={"Revision": info["Revision"], "FilePath": name},
-                         headers=headers, stream=True, timeout=(10, 30)) as response:
-            response.raise_for_status()
-            if offset and response.status_code == 200:
-                offset, digest = 0, hashlib.sha256()
-                if bar:
-                    bar.n = 0
-            elif response.status_code == 206 and not response.headers.get("Content-Range", "").startswith(f"bytes {offset}-"):
-                raise OSError("模型续传范围不匹配")
-            with part.open("ab" if offset else "wb", buffering=0) as file:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if check_cancel:
-                        check_cancel()
-                    if chunk:
-                        file.write(chunk)
-                        digest.update(chunk)
-                        if bar:
-                            bar.update(len(chunk))
-            if check_cancel:
-                check_cancel()
-        if part.stat().st_size != size or digest.hexdigest() != expected:
-            raise OSError(f"模型文件 {name} 大小或 SHA256 校验失败")
-        part.replace(target)
-    finally:
-        if bar:
-            bar.close()
-
-
-def _download_modelscope(config, model: str, tqdm_class=None, on_status=None,
-                         check_cancel=None) -> Path:
-    """直接读取国内同名 CT2 仓库；保留分片、按仓库 SHA256 校验后原子提交。"""
-    import requests
-    repo = f"Systran/faster-whisper-{model}"
-    proxy = _whisper_proxy(config)
-    with requests.Session() as session:
-        session.trust_env = False
-        session.proxies = {"http": proxy, "https": proxy} if proxy else {}
-        if check_cancel:
-            check_cancel()
-        with session.get(f"https://modelscope.cn/api/v1/models/{repo}/repo/files",
-                         params={"Revision": "master", "Recursive": "true"},
-                         timeout=(10, 30)) as response:
-            response.raise_for_status()
-            payload = response.json()
-        files = [f for f in (payload.get("Data") or {}).get("Files", [])
-                 if f.get("Type") == "blob" and "/" not in f.get("Path", "")
-                 and "\\" not in f.get("Path", "")
-                 and any(fnmatch.fnmatch(f.get("Path", ""), p) for p in WHISPER_FILES)]
-        names = [f["Path"] for f in files]
-        if (len(names) != len(set(names)) or not {"model.bin", "config.json", "tokenizer.json"}.issubset(names)
-                or not any(n.startswith("vocabulary.") for n in names)):
-            raise OSError("国内仓库缺少完整的 CTranslate2 模型文件")
-        for info in files:
-            sha = info.get("Sha256", "")
-            if (not isinstance(info.get("Size"), int) or info["Size"] <= 0
-                    or not info.get("Revision") or len(sha) != 64
-                    or any(c not in "0123456789abcdef" for c in sha.lower())):
-                raise OSError("国内仓库文件校验信息不完整")
-        path = _modelscope_model_path(model)
-        path.mkdir(parents=True, exist_ok=True)
-        set_total = getattr(tqdm_class, "set_download_total", None)
-        if callable(set_total):
-            set_total(sum(f["Size"] for f in files))
-        for info in files:
-            if on_status:
-                on_status(f"正在从国内 ModelScope 下载 Whisper {model} · {info['Path']}…")
-            _download_modelscope_file(session, repo, path, info, tqdm_class, check_cancel)
-        if not whisper_model_complete(path, model):
-            raise OSError("国内模型文件不完整或 JSON 文件损坏")
-        manifest = path / "download.json.part"
-        manifest.write_text(json.dumps({f["Path"]: f["Size"] for f in files}), encoding="utf-8")
-        manifest.replace(path / "download.json")
-        return path
-
-
-def download_whisper_model(config, model: str, tqdm_class=None, on_status=None,
-                           check_cancel=None) -> Path:
-    """国内直达优先，保留 Hub 镜像/官方的缓存续传回退，不修改进程环境。"""
-    import huggingface_hub
-    from faster_whisper import utils
-
-    if check_cancel:
-        check_cancel()
-    cached = local_whisper_model(model)
-    if cached is not None:
-        return cached
-    repo = utils._MODELS.get(model)
-    if repo is None:
-        if "/" not in model or Path(model).is_dir():
-            raise AppError(Codes.CFG_INVALID, f"模型名称无效或本地模型不完整：{model}")
-        repo = model
-    endpoint = str(config.get("transcriber.hf_endpoint", "") or "").strip().rstrip("/")
-    endpoints = list(dict.fromkeys([endpoint or "https://huggingface.co",
-                                    "https://huggingface.co"]))
-    last_error = None
-    repair = False
-    # ponytail: Hub 1.x 共享 HTTP 客户端，模型下载串行；需要并行时改为独立下载进程。
-    wait_status = lambda: on_status("等待其他模型下载完成…") if on_status else None
-    with _preparation_lock(_whisper_download_lock, check_cancel, wait_status):
-        cached = local_whisper_model(model)
-        if cached is not None:
-            return cached
-        if model in _MODELSCOPE_WHISPER:
-            for attempt in range(2):
-                if check_cancel:
-                    check_cancel()
-                if on_status:
-                    on_status(f"正在连接国内 ModelScope 模型仓库（第 {attempt + 1}/2 次）…")
-                try:
-                    return _download_modelscope(config, model, tqdm_class, on_status, check_cancel)
-                except Exception as e:
-                    if isinstance(e, AppError) and e.code == Codes.TASK_CANCELLED:
-                        raise
-                    last_error = e
-                    log.warning("Whisper %s 国内源下载尝试 %d 失败：%s", model, attempt + 1, e)
-            if on_status:
-                on_status("国内模型源暂不可用，正在切换备用仓库…")
-        _configure_whisper_http(config)
-        for endpoint in endpoints:
-            for attempt in range(2):
-                if check_cancel:
-                    check_cancel()
-                if on_status:
-                    source = "官方" if endpoint == "https://huggingface.co" else "配置的镜像"
-                    on_status(f"正在连接{source}模型仓库（第 {attempt + 1}/2 次）…")
-                try:
-                    options = dict(endpoint=endpoint, allow_patterns=list(WHISPER_FILES),
-                        tqdm_class=tqdm_class, etag_timeout=10, token=False,
-                        force_download=repair)
-                    set_total = getattr(tqdm_class, "set_download_total", None)
-                    if callable(set_total):
-                        # Hub 的字节条 total 随文件线程启动增长；先取完整待下载量。
-                        files = huggingface_hub.snapshot_download(repo, dry_run=True, **options)
-                        if check_cancel:
-                            check_cancel()
-                        set_total(sum(f.file_size or 0 for f in files if f.will_download))
-                    path = Path(huggingface_hub.snapshot_download(repo, **options))
-                    if check_cancel:
-                        check_cancel()
-                    if not whisper_model_complete(path, model):
-                        repair = True
-                        raise OSError("模型文件不完整或 JSON 文件损坏")
-                    return path
-                except Exception as e:
-                    if isinstance(e, AppError) and e.code == Codes.TASK_CANCELLED:
-                        raise
-                    last_error = e
-                    log.warning("Whisper %s 下载尝试 %d 失败：%s", model, attempt + 1, e)
-                    if attempt == 0:
-                        for _ in range(10):
-                            if check_cancel:
-                                check_cancel()
-                            time.sleep(0.1)
-    raise AppError(Codes.ASR_FAILED, "Whisper 模型下载失败", detail=str(last_error),
-                   retryable=True, suggestion="检查网络或代理后重试；未完成的下载会续传")
-
-
-@dataclass
-class Segment:
-    """一条带时间戳的字幕句。"""
-
-    start: float
-    end: float
-    text: str
-
-
-def _sentence_finished(text: str) -> bool:
-    """句末引号不妨碍断句；小数、常见称谓和字母缩写不作为句末。"""
-    text = text.rstrip().rstrip('"\'”’」』）)]}')
-    if text.endswith(tuple("。！？!?；;")):
-        return True
-    if not text.endswith("."):
-        return False
-    last = text.split()[-1].lower()
-    return last not in {"mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.",
-                        "e.g.", "i.e.", "vs.", "etc."} and not re.fullmatch(r"(?:[a-z]\.)+", last)
-
-
-def _join_speech_tokens(tokens) -> str:
-    """无原文时保留已有空格，并在分离的西文词之间补空格。"""
-    text = ""
-    for token in tokens:
-        if not token:
-            continue
-        if (text and (text[-1].isalnum() or text[-1] in ",.!?;:") and token[0].isalnum()
-                and unicodedata.east_asian_width(text[-1]) not in "WF"
-                and unicodedata.east_asian_width(token[0]) not in "WF"):
-            text += " "
-        text += token
-    return text.strip()
-
-
-def _timed_word_segments(text: str, words, word_sink: list[Segment] | None = None) -> list[Segment] | None:
-    """按真实词时间、句末和停顿分段；无法完整对齐时保留调用方的整段结果。
-
-    云端词表可能省略标点，因此把词逐一对齐到原文后再切片，不能用词表
-    覆盖原文。无标点长句最多约 6 秒或 32 个汉字，并始终在词边界切分。
-    宽度控制在字幕单行内，避免后续排版再次按字数估算字幕起止时间。
-    此处不判断说话人身份；没有停顿或标点的换人需要专门的说话人识别。
-    """
-    if not isinstance(words, (list, tuple)) or not words:
-        return None
-    timed: list[tuple[str, float, float]] = []
-    for item in words:
-        get = (item.get if isinstance(item, dict)
-               else lambda key, default=None: getattr(item, key, default))
-        token = get("word", get("text", ""))
-        if not isinstance(token, str):
-            return None
-        if not token.strip():
-            continue
-        try:
-            start, end = float(get("start")), float(get("end"))
-        except (TypeError, ValueError):
-            return None
-        if (not math.isfinite(start) or not math.isfinite(end) or start < 0 or end < start
-                or (timed and (start < timed[-1][1] or end < timed[-1][2]))):
-            return None
-        timed.append((token, start, end))
-    if not timed:
-        return None
-    text = text.strip()
-    if not text:
-        text = _join_speech_tokens(token for token, _, _ in timed)
-    boundaries = [0]
-    cursor = 0
-    for i, (token, _, _) in enumerate(timed):
-        token = token.strip()
-        pos = text.find(token, cursor)
-        if pos < 0 or any(not ch.isspace() and not unicodedata.category(ch).startswith("P")
-                          for ch in text[cursor:pos]):
-            return None
-        if i:
-            cut = pos
-            # 原文额外提供的前置引号归给下一句，句末标点仍归给上一句。
-            while cut > cursor:
-                ch = text[cut - 1]
-                opening = ch in "“‘「『（([{"
-                opening = opening or ch == '"' and text[:cut].count('"') % 2 == 1
-                if not ch.isspace() and not opening:
-                    break
-                cut -= 1
-            boundaries.append(cut)
-        cursor = pos + len(token)
-    if any(not ch.isspace() and not unicodedata.category(ch).startswith("P") for ch in text[cursor:]):
-        return None
-    boundaries.append(len(text))
-    out: list[Segment] = []
-    first = 0
-
-    def emit(last: int) -> None:
-        out.append(Segment(timed[first][1], timed[last][2],
-                           text[boundaries[first]:boundaries[last + 1]].strip()))
-
-    for i in range(len(timed)):
-        if i > first:
-            candidate = text[boundaries[first]:boundaries[i + 1]].strip()
-            width = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in candidate)
-            if (timed[i][1] - timed[i - 1][2] >= .6 - 1e-6
-                    or timed[i][2] - timed[first][1] > 6 or width > 64):
-                if timed[i - 1][2] > timed[first][1] and timed[i][1] >= timed[i - 1][2]:
-                    emit(i - 1)
-                    first = i
-        piece = text[boundaries[first]:boundaries[i + 1]]
-        next_clear = i == len(timed) - 1 or timed[i + 1][1] >= timed[i][2]
-        if _sentence_finished(piece) and timed[i][2] > timed[first][1] and next_clear:
-            emit(i)
-            first = i + 1
-    if first < len(timed):
-        if timed[-1][2] > timed[first][1]:
-            emit(len(timed) - 1)
-        else:
-            # 末尾仅剩零时长词时不能丢文本，也不能生成零时长字幕。
-            return None
-    if out and word_sink is not None:
-        word_sink.extend(Segment(start, end, text[boundaries[i]:boundaries[i + 1]])
-                         for i, (_, start, end) in enumerate(timed))
-    return out or None
-
-
-def _wav_duration(audio_path: Path | None) -> float:
-    if audio_path is None:
-        return 0.0
-    try:
-        with wave.open(str(audio_path), 'rb') as audio:
-            return audio.getnframes() / audio.getframerate()
-    except (OSError, wave.Error, EOFError, ZeroDivisionError):
-        return 0.0
-
-
-def _clip_audio_timing(items: list[Segment], duration: float, allow_zero=False) -> list[Segment]:
-    """轻微编码尾差可截断，超出实际音频或无法显示的字幕时间必须回退或报错。"""
-    out = []
-    for item in items:
-        start, end = item.start, item.end
-        if (not math.isfinite(start) or not math.isfinite(end) or start < 0 or end < start
-                or (duration > 0 and (start > duration or end > duration + .1))):
-            raise ValueError('字幕时间超出有效音频范围')
-        if duration > 0:
-            end = min(end, duration)
-        if not allow_zero and round(end * 1000) <= round(start * 1000):
-            raise ValueError('字幕时长不足一毫秒')
-        out.append(Segment(start, end, item.text))
-    return out
-
-
-def _timed_audio_segments(text: str, words, duration: float,
-                          word_sink: list[Segment] | None = None) -> list[Segment] | None:
-    aligned = []
-    cues = _timed_word_segments(text, words, aligned)
-    if not cues:
-        return None
-    try:
-        cues = _clip_audio_timing(cues, duration)
-        aligned = _clip_audio_timing(aligned, duration, allow_zero=True)
-    except ValueError:
-        return None
-    if word_sink is not None:
-        word_sink.extend(aligned)
-    return cues
-
-
-def write_json_atomic(path: Path, value: dict) -> None:
-    """先写临时文件再替换，进程中断不能损坏已有识别检查点。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         suffix=".tmp", delete=False) as stream:
-            temporary = Path(stream.name)
-            json.dump(value, stream, ensure_ascii=False, indent=1, allow_nan=False)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
-
-@dataclass
-class Transcript:
-    """一次转写的完整结果（含检测到的源语言）。"""
-
-    language: str
-    segments: list[Segment] = field(default_factory=list)
-    words: list[Segment] = field(default_factory=list)
-
-    def normalized(self) -> "Transcript":
-        """语言归一化：中文输出统一为简体（Whisper 常输出繁体，如「天氣/識別」）。
-
-        OpenCC 缺失时静默跳过（转换是增强项，不阻断主流程）。
-        """
-        if not self.language.startswith("zh"):
-            return self
-        try:
-            from opencc import OpenCC
-        except ImportError:
-            log.info("检测到中文输出，但未安装 opencc，跳过繁简归一化"
-                     "（pip install opencc-python-reimplemented）")
-            return self
-        cc = OpenCC("t2s")
-        return self.__class__(
-            language=self.language,
-            segments=[Segment(s.start, s.end, cc.convert(s.text))
-                      for s in self.segments],
-            words=[Segment(s.start, s.end, cc.convert(s.text)) for s in self.words])
-
-    def save_json(self, path: Path) -> None:
-        self.validate()
-        write_json_atomic(path, asdict(self))
-
-    @classmethod
-    def load_json(cls, path: Path) -> "Transcript":
-        return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Transcript":
-        if (not isinstance(data, dict) or not isinstance(data.get('language'), str)
-                or not data['language'].strip() or not isinstance(data.get('segments'), list)
-                or not isinstance(data.get('words', []), list)):
-            raise ValueError('识别检查点的语言或句子结构无效')
-        try:
-            result = cls(language=normalize_asr_language(data['language']),
-                         segments=[Segment(**s) for s in data['segments']],
-                         words=[Segment(**s) for s in data.get('words', [])])
-        except TypeError as exc:
-            raise ValueError('识别检查点的时间轴结构无效') from exc
-        result.validate()
-        return result
-
-    def validate(self) -> None:
-        """缓存中的文本与时间轴都须有效；词级标点可以零时长，字幕句不可以。"""
-        if (not isinstance(self.language, str) or not self.language.strip()
-                or not isinstance(self.segments, list) or not isinstance(self.words, list)):
-            raise ValueError('识别结果的语言或句子结构无效')
-        for items, is_word in ((self.segments, False), (self.words, True)):
-            for item in items:
-                if (not isinstance(item, Segment) or not isinstance(item.text, str) or not item.text.strip()
-                        or type(item.start) not in (int, float) or type(item.end) not in (int, float)
-                        or not math.isfinite(item.start) or not math.isfinite(item.end)
-                        or item.start < 0 or item.end < item.start
-                        or (not is_word and round(item.end * 1000) <= round(item.start * 1000))):
-                    raise ValueError('识别结果含空文本或无效时间轴')
 
 
 class TranscriberProvider(ABC):
@@ -714,12 +70,6 @@ class FasterWhisperTranscriber(TranscriberProvider):
         self._leases = 0
         self._lease_context = threading.local()
         self._retired = False
-        self._retire_requested = threading.Event()
-        self._maintenance_thread = None
-        if self._unload_after > 0:
-            self._maintenance_thread = threading.Thread(target=self._idle_unloader, daemon=True,
-                                                        name='whisper-maintenance')
-            self._maintenance_thread.start()
 
     @property
     def _request_config(self):
@@ -752,40 +102,42 @@ class FasterWhisperTranscriber(TranscriberProvider):
             with self._lifecycle:
                 self._leases -= 1
                 self._last_used = time.monotonic()
-                self._lifecycle.notify_all()
+                release = self._retired and self._leases == 0
+            if release:
+                self._release_model()
 
     def close(self) -> None:
-        """非阻塞退休：唤醒维护线程，最后一个任务退出后才释放旧模型。"""
+        """最后一个已开始的任务交还模型，切换配置无需等待推理。"""
         with self._lifecycle:
             if self._retired:
                 return
             self._retired = True
-            self._retire_requested.set()
-            if self._maintenance_thread is None:
-                self._maintenance_thread = threading.Thread(target=self._release_retired, daemon=True,
-                                                            name='whisper-retirement')
-                self._maintenance_thread.start()
+            release = self._leases == 0
+        model_maintenance.forget(self)
+        if release:
+            self._release_model()
 
-    def _release_retired(self) -> None:
-        with self._lifecycle:
-            while self._leases:
-                self._lifecycle.wait()
+    def _release_model(self) -> None:
         with self._lock:
             self._model = None
             self._loaded_key = None
 
-    def _idle_unloader(self) -> None:
-        while not self._retire_requested.wait(60):
-            with self._lock:
-                with self._lifecycle:
-                    idle = not self._leases and not self._retired
-                if (idle and self._model is not None
-                        and time.monotonic() - self._last_used > self._unload_after):
-                    log.info("模型空闲 %.0f 分钟，自动卸载释放内存",
-                             (time.monotonic() - self._last_used) / 60)
-                    self._model = None
-                    self._loaded_key = None
-        self._release_retired()
+    def release_idle_model(self) -> bool:
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            with self._lifecycle:
+                if self._retired or self._model is None:
+                    model_maintenance.forget(self)
+                    return True
+                if self._leases or time.monotonic() - self._last_used <= self._unload_after:
+                    return False
+                self._model = None
+                self._loaded_key = None
+                model_maintenance.forget(self)
+                return True
+        finally:
+            self._lock.release()
 
     def _load_model(self, device_override: str | None = None,
                     model_override: str | None = None, on_progress=None):
@@ -848,6 +200,8 @@ class FasterWhisperTranscriber(TranscriberProvider):
             self._model = WhisperModel(str(path), device="cpu", compute_type="int8")
             key = (size, "cpu", "int8")
         self._loaded_key = key
+        if self._unload_after > 0 and not self._retired:
+            model_maintenance.track(self)
         report(f"Whisper {size} 模型已就绪，准备识别…")
         return self._model
 
@@ -889,10 +243,17 @@ class FasterWhisperTranscriber(TranscriberProvider):
 
     def _transcribe_inner(self, audio_path: Path, source_lang: str | None,
                           on_progress, device_override: str | None) -> Transcript:
+        from .whisper_audio import decode_audio
+
         try:
             model = self._load_model(device_override, on_progress=on_progress)
+            def check_cancel():
+                if on_progress:
+                    on_progress(0.0, "读取语音识别音轨…")
+
+            audio = decode_audio(audio_path, self._request_config, check_cancel)
             words: list[Segment] = []
-            out, info = self._run_model(model, audio_path, source_lang,
+            out, info = self._run_model(model, audio, source_lang,
                                         on_progress, vad=True, word_sink=words)
             if not out:
                 # VAD 全删不一定真是没人声：低音量/配乐盖人声常被误杀
@@ -901,7 +262,7 @@ class FasterWhisperTranscriber(TranscriberProvider):
                 log.warning("VAD 过滤了全部音频（时长 %.1fs），关闭 VAD 重试",
                             float(info.duration or 0))
                 words.clear()
-                out, info = self._run_model(model, audio_path, source_lang,
+                out, info = self._run_model(model, audio, source_lang,
                                             on_progress, vad=False, word_sink=words)
         except AppError:
             raise
@@ -919,7 +280,7 @@ class FasterWhisperTranscriber(TranscriberProvider):
         transcript = Transcript(language=str(info.language or "unknown"), segments=out, words=words)
         return transcript.normalized()
 
-    def _run_model(self, model, audio_path: Path, source_lang: str | None,
+    def _run_model(self, model, audio, source_lang: str | None,
                    on_progress, vad: bool, word_sink: list[Segment] | None = None
                    ) -> tuple[list[Segment], object]:
         """跑一遍 whisper 生成器；vad=False 用于 VAD 误杀全音频时的兜底。"""
@@ -930,7 +291,7 @@ class FasterWhisperTranscriber(TranscriberProvider):
         config = self._request_config
         beam = int(config.get("transcriber.beam_size", 5) or 5)
         segments_iter, info = model.transcribe(
-            str(audio_path), language=source_lang or None,
+            audio, language=source_lang or None,
             vad_filter=vad,           # 过滤静音段：长视频更快更准
             beam_size=max(1, beam),
             # 词级时间戳：Whisper 句级时间戳天然首尾相接（上一句 end=下一句
@@ -943,7 +304,7 @@ class FasterWhisperTranscriber(TranscriberProvider):
             initial_prompt=str(config.get("transcriber.initial_prompt", "") or "") or None,
             hotwords=str(config.get("transcriber.hotwords", "") or "") or None,
         )
-        duration = _wav_duration(audio_path) or float(info.duration or 0)
+        duration = float(info.duration or 0)
         if not math.isfinite(duration) or duration <= 0:
             duration = 0.0
         out: list[Segment] = []
@@ -1167,51 +528,6 @@ class CloudAsrTranscriber(TranscriberProvider):
             raise AppError(Codes.ASR_FAILED, '缺少有效字幕时间轴，且无法确定实际音频时长', retryable=True,
                            suggestion='确认音频文件完整，或选择返回时间戳的识别模型后重试')
         return [Segment(start=0.0, end=duration, text=source)], language
-
-
-def _has_cuda() -> bool:
-    try:
-        if os.name == 'nt':
-            import ctypes
-            driver = ctypes.WinDLL('nvcuda.dll', winmode=0x800)
-            driver.cuInit.argtypes, driver.cuInit.restype = [ctypes.c_uint], ctypes.c_int
-            driver.cuDeviceGetCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
-            driver.cuDeviceGetCount.restype = ctypes.c_int
-            count = ctypes.c_int()
-            return driver.cuInit(0) == 0 and driver.cuDeviceGetCount(ctypes.byref(count)) == 0 and count.value > 0
-        import ctranslate2
-        return ctranslate2.get_cuda_device_count() > 0
-    except Exception:
-        return False
-
-
-def _add_nvidia_dll_dirs(check_cancel=None, on_status=None) -> None:
-    """注册随包及 pip CUDA 运行库；原生 LoadLibrary 还需要进程 PATH。"""
-    import os
-    import sys
-    if os.name != "nt":
-        return
-    from .cuda_runtime import ensure_cuda_runtime
-    bundled = bin_dir() / "cuda"
-    if (bundled / "runtime.json").is_file():
-        bundled = ensure_cuda_runtime(bundled, data_dir() / "cache" / "cuda",
-                                      check_cancel, on_status)
-    candidates = [bundled] + [
-        Path(base) / "nvidia" / pkg / "bin"
-        for pkg in ("cublas", "cudnn") for base in list(sys.path)]
-    for candidate in candidates:
-        if not candidate.is_dir():
-            continue
-        path = str(candidate.resolve())
-        if path in _cuda_dll_handles:
-            continue
-        try:
-            _cuda_dll_handles[path] = os.add_dll_directory(path)
-            if path not in os.environ.get("PATH", "").split(os.pathsep):
-                os.environ["PATH"] = path + os.pathsep + os.environ.get("PATH", "")
-            log.info("已注册 CUDA 运行库目录：%s", path)
-        except OSError:
-            pass
 
 
 def build_transcriber(config) -> TranscriberProvider:

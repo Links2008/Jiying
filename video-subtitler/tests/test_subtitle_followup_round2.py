@@ -101,7 +101,7 @@ def test_real_positioned_burn_preserves_literal_braces_and_backslash_commands(tm
     header = actual.read_text(encoding="utf-8").split("Dialogue: ")[0]
     # 明确写出 libass 的字面量规则，再让真实渲染器比较可见像素。
     reference.write_text(header + r"Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,"
-                         r"{\an5\pos(320,200)}Literal \{name\}, C:\{}new \{}N \{}n \{}h." + "\n",
+                         r"{\an5\pos(192,160)}Literal \{name\}, C:\{}new \{}N \{}n \{}h." + "\n",
                          encoding="utf-8")
 
     def pixels(path):
@@ -113,3 +113,34 @@ def test_real_positioned_burn_preserves_literal_braces_and_backslash_commands(tm
     expected = pixels(reference)
     assert len(expected) == 640 * 360 and sum(value > 100 for value in expected) > 100
     assert pixels(actual) == expected
+
+
+@pytest.mark.parametrize("position", ["top", "middle", "bottom"])
+@pytest.mark.parametrize("person_notes", [False, True])
+def test_real_preview_one_step_moves_caption_without_resizing(tmp_path, position, person_notes):
+    import os
+    import subprocess
+
+    ffmpeg = os.environ.get("JIYING_TEST_FFMPEG")
+    if not ffmpeg:
+        pytest.skip("需要显式指定真实 FFmpeg")
+    config = Config({"paths": {"ffmpeg": ffmpeg}})
+
+    def caption(offset):
+        image = renderer.render_preview_png(
+            config, "Sample ABC xyz\nSecond line", "Arial", 18, position,
+            tmp_path / f"preview-{offset}.png", outline=2,
+            vertical_offset=offset, horizontal_offset=offset, person_notes=person_notes)
+        pixels = subprocess.check_output([ffmpeg, "-v", "error", "-i", str(image),
+            "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"], timeout=15)
+        # 中间区域只有对白；同时取白字和深色描边像素。
+        ink = {(x, y) for y in range(360) for x in range(210, 425)
+               if pixels[640 * y + x] > 170 or pixels[640 * y + x] < 20}
+        assert len(ink) > 200
+        xs, ys = zip(*ink)
+        return (min(xs), min(ys), max(xs), max(ys)), len(ink)
+
+    before, ink_before = caption(0)
+    after, ink_after = caption(1)
+    assert all(abs((b - a) - 1) <= 1 for a, b in zip(before, after)), (before, after)
+    assert abs(ink_before - ink_after) < ink_before * .04

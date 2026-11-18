@@ -7,6 +7,7 @@ from app.core import cancel
 from app.core.config import Config
 from app.core.errors import AppError, Codes
 from app.models.db import Store
+from app.pipeline import resources
 from app.pipeline import runner as pipeline
 from app.services.downloader.aria2c import Aria2cBackend
 from app.services.engines.base import DirectTarget
@@ -153,7 +154,7 @@ def test_cancellation_during_io_queue_does_not_start_download(monkeypatch, tmp_p
             return True
         def release(self):
             pass
-    monkeypatch.setitem(pipeline._POOLS, "io", CancelOnAcquire())
+    monkeypatch.setitem(resources._POOLS, "io", CancelOnAcquire())
     monkeypatch.setattr(runner, "_download_inner", lambda *args: called.append(args))
     try:
         with pytest.raises(AppError) as error:

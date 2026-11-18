@@ -55,7 +55,7 @@ def translation_runner(tmp_path, monkeypatch, translated):
     transcript = SimpleNamespace(language="en", segments=[Segment(0, 1, "one"), Segment(1, 2, "two")])
     calls = []
     translator = SimpleNamespace(translate=lambda *_args, **_kwargs: calls.append(True) or translated)
-    monkeypatch.setattr("app.pipeline.runner.build_translator", lambda *_: translator)
+    monkeypatch.setattr("app.pipeline.translation.build_translator", lambda *_: translator)
     return runner, task, transcript, calls
 
 
@@ -168,7 +168,7 @@ def test_bilingual_softmux_embeds_merged_subtitle_first(tmp_path, monkeypatch):
         captured.extend((lang, path.read_text(encoding="utf-8-sig")) for path, lang in tracks)
         out.write_bytes(b"video")
         return out
-    monkeypatch.setattr("app.pipeline.runner.softmux", mux)
+    monkeypatch.setattr("app.pipeline.rendering.softmux", mux)
     runner._stage_render(task, tmp_path / "video.mp4", subs)
     assert [lang for lang, _ in captured] == ["zh+en", "zh", "en"]
     assert parse_srt(captured[0][1])[0].text == "你好。\nHello."
@@ -191,12 +191,12 @@ def test_translation_disables_thinking_only_for_deepseek_endpoint(monkeypatch, b
 
 
 def test_translation_rejects_length_truncated_response(monkeypatch):
-    import requests
+    from app.services.translator import _IncompleteTranslation
     monkeypatch.setattr("requests.post", lambda *_a, **_k: SimpleNamespace(
         raise_for_status=lambda: None, json=lambda: {
             "choices": [{"finish_reason": "length", "message": {"content": "1. 截断内容"}}]}))
     t = LLMTranslator(Config({"translator": {"llm": {"base_url": "https://example.test", "model": "demo"}}}))
-    with pytest.raises(requests.RequestException):
+    with pytest.raises(_IncompleteTranslation):
         t._call_api("hello")
 
 

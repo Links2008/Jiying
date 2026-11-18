@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup>
+    <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)video-subtitler/app/VERSION').Trim())</Version>
+  </PropertyGroup>
+</Project>

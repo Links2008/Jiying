@@ -91,7 +91,7 @@ def test_same_named_tasks_never_overwrite_each_other(tmp_path, monkeypatch, mode
             return SimpleNamespace(language="zh"), srt
 
         runner._stage_transcribe = transcribe
-        monkeypatch.setattr("app.pipeline.runner.burn",
+        monkeypatch.setattr("app.pipeline.rendering.burn",
                             lambda cfg, video, srt, out, **kw: out.write_bytes(video.read_bytes()))
 
     paths = []
@@ -149,7 +149,7 @@ def test_burn_exposes_only_selected_video(tmp_path, monkeypatch, bilingual):
 
     runner._stage_transcribe = lambda *_: (SimpleNamespace(language="fr"), subtitle("fr"))
     runner._stage_translate = lambda *_: {"zh": subtitle("zh")}
-    monkeypatch.setattr("app.pipeline.runner.burn", lambda cfg, video, srt, out, **kw: out.write_bytes(b"burned"))
+    monkeypatch.setattr("app.pipeline.rendering.burn", lambda cfg, video, srt, out, **kw: out.write_bytes(b"burned"))
 
     assert runner.run(task)["status"] == "completed"
     files = list(output.iterdir())

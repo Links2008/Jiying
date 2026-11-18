@@ -77,7 +77,9 @@ def test_native_requires_all_fragments_and_keeps_selected_format(tmp_path, monke
     assert engine.download("https://example.test/video", "hls-1080", tmp_path) == [media]
     assert opts.get("skip_unavailable_fragments") is False
     assert opts.get("fragment_retries", 0) >= 3
-    assert opts["format"] == "hls-1080[acodec=none]+ba/hls-1080"
+    chosen = {"format_id": "hls-1080", "height": 1080, "vcodec": "h264", "acodec": "aac"}
+    higher = {**chosen, "format_id": "hls-2160", "height": 2160}
+    assert list(opts["format"]({"formats": [chosen, higher]})) == [chosen]
 
 
 @pytest.mark.parametrize('cancelled', [False, True])
@@ -126,15 +128,19 @@ def test_native_returns_real_mp4_even_for_single_webm_stream(tmp_path, monkeypat
 def test_mux_rejects_three_second_picture_loss_in_short_clip(tmp_path, monkeypatch):
     monkeypatch.setattr(renderer, "find_ffmpeg", lambda _: "ffmpeg")
     monkeypatch.setattr(renderer, "probe_duration", lambda *_args, **_kwargs: 30.708)
-    monkeypatch.setattr(renderer, "_video_packet_duration", lambda *_: 27.708, raising=False)
-
     def run(_args, **kwargs):
-        if kwargs.get("on_time"):
-            kwargs["on_time"](27.708)
+        if packets := kwargs.get("stdout"):
+            packets.write(b"#tb 0: 1/1000\n0,0,0,27708,12,0x1\n")
 
     monkeypatch.setattr(renderer, "_run", run)
     with pytest.raises(AppError, match="下载文件不完整"):
         renderer.mux_av(Config({}), Path("video"), Path("audio"), tmp_path / "merged.mp4")
+
+
+def test_packet_scan_detects_corruption_after_ambiguous_timestamps():
+    rows = [b"#tb 0: 1/90000\n", b"0,0,0,0,4,0x1\n", b"0,1,1,1,4,0x1,F=0x2\n"]
+    with pytest.raises(AppError, match="视频数据损坏"):
+        renderer._packet_span(rows, None)
 
 
 def test_low_frame_rate_b_frames_are_not_mistaken_for_truncation(tmp_path):
@@ -175,7 +181,8 @@ def test_packet_probe_preserves_cancel_during_open(monkeypatch, tmp_path):
         cancel.cancel(tid)
         raise ValueError("damaged input")
 
-    monkeypatch.setattr(av, "open", open_cancelled)
+    monkeypatch.setattr(renderer, "_run", open_cancelled)
+    monkeypatch.setattr(renderer, "find_ffprobe", lambda _: "ffprobe")
     try:
         with pytest.raises(AppError) as error:
             renderer._video_packet_duration(tmp_path / "clip.mp4", tid)

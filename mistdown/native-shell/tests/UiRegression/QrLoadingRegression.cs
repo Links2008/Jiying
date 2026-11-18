@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using Jiying.Desktop;
@@ -8,13 +7,9 @@ internal static class QrLoadingRegression
 {
     internal static async Task Run(MainWindow owner, Action<bool, string> check)
     {
-        var type = typeof(PlatformConnectionWindow);
-        var policy = type.GetMethod("DeferScanResource", BindingFlags.Static | BindingFlags.NonPublic);
-        check(policy is not null, "扫码阶段具有轻量资源策略");
-        if (policy is not null)
         {
             bool Defer(string url, CoreWebView2WebResourceContext kind, bool selecting = false)
-                => (bool)policy.Invoke(null, [url, kind, selecting])!;
+                => PlatformConnectionWindow.DeferScanResource(url, kind, selecting);
             check(Defer("https://video.douyin.com/feed.mp4", CoreWebView2WebResourceContext.Media), "扫码阶段暂停网页视频加载");
             check(!Defer("https://video.douyin.com/feed.mp4", CoreWebView2WebResourceContext.Media, true), "选视频阶段恢复网页媒体加载");
             check(Defer("https://sns-webpic-qc.xhscdn.com/note", CoreWebView2WebResourceContext.Image), "扫码阶段不加载笔记封面");
@@ -22,15 +17,12 @@ internal static class QrLoadingRegression
             check(!Defer("https://verify.snssdk.com/captcha.png", CoreWebView2WebResourceContext.Image), "安全验证图片正常加载");
             check(!Defer("https://www.douyin.com/passport/check", CoreWebView2WebResourceContext.XmlHttpRequest), "官网登录及验证请求保持完整");
         }
-        var save = type.GetMethod("TrySaveDouyinLoginAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-        check(save is not null, "抖音使用官网确认状态自动完成登录");
         var count = 0;
         var video = new PlatformConnectionWindow(owner, "douyin", "https://v.douyin.com/sample/", _ => { count++; return Task.CompletedTask; });
         check(video.Width <= 560 && ((Button)video.FindName("UseVideoButton")).Visibility == Visibility.Collapsed, "抖音首先只显示紧凑扫码窗口");
-        if (save is not null)
         {
             Task<bool> Save(PlatformConnectionWindow target, bool authenticated, IReadOnlyList<WebsiteCookie> cookies)
-                => (Task<bool>)save.Invoke(target, [authenticated, cookies])!;
+                => target.TrySaveDouyinLoginAsync(authenticated, cookies);
             WebsiteCookie Cookie(string name = "sessionid", string domain = ".douyin.com", long expires = 0)
                 => new(domain, name, "isolated-test-value", "/", true, true, expires);
             check(!await Save(video, false, [Cookie()]) && count == 0, "抖音未确认登录不自动完成");

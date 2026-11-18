@@ -39,20 +39,20 @@ def fail_config_write(monkeypatch, target, *, truncate=False):
 
 def test_failed_save_keeps_runtime_provider_capacity_and_probe_cache(tmp_path, monkeypatch):
     api = client()
-    previous = deepcopy(server._config.raw)
-    provider = server._runner._transcriber
+    previous = deepcopy(api.app.state.runtime.config.raw)
+    provider = api.app.state.runtime.runner._transcriber
     effects = []
     from app.pipeline import runner
     monkeypatch.setattr(runner, "set_max_concurrent", lambda value: effects.append(("concurrent", value)))
-    monkeypatch.setattr(server._runner, "reload_transcriber", lambda **kw: effects.append(("reload", kw)))
-    monkeypatch.setattr(server._store, "cache_purge_kind", lambda kind: effects.append(("cache", kind)))
+    monkeypatch.setattr(api.app.state.runtime.runner, "reload_transcriber", lambda **kw: effects.append(("reload", kw)))
+    monkeypatch.setattr(api.app.state.runtime.store, "cache_purge_kind", lambda kind: effects.append(("cache", kind)))
     fail_config_write(monkeypatch, paths.default_config_path())
     response = api.post("/api/v1/config", json={"model": "medium", "transcriber_provider": "cloud",
                                                "max_concurrent": 4, "cookies": "模拟路径",
                                                "asr_api_key": "test-only-not-real"})
     assert response.status_code >= 500
-    assert server._config.raw == previous
-    assert server._runner._transcriber is provider
+    assert api.app.state.runtime.config.raw == previous
+    assert api.app.state.runtime.runner._transcriber is provider
     assert effects == []
     assert response.status_code == 503
     assert "test-only-not-real" not in response.text
@@ -75,7 +75,7 @@ def test_save_creates_missing_config_parent_and_roundtrips_custom_settings(tmp_p
     target = tmp_path / "nested" / "settings" / "config.yaml"
     monkeypatch.setattr(paths, "default_config_path", lambda: target)
     api = client()
-    server._config.raw["user_custom"] = {"keep": "保留"}
+    api.app.state.runtime.config.raw["user_custom"] = {"keep": "保留"}
     assert api.post("/api/v1/config", json={"asr_hotwords": "RAG", "model": "medium"}).status_code == 200
     loaded = config_module.load_config(target)
     assert loaded.get("user_custom.keep") == "保留"
@@ -91,7 +91,7 @@ def test_invalid_existing_file_is_preserved_instead_of_silently_overwritten(tmp_
     response = api.post("/api/v1/config", json={"model": "medium"})
     assert response.status_code == 503
     assert target.read_text(encoding="utf-8") == invalid
-    assert server._config.get("transcriber.model") == "small"
+    assert api.app.state.runtime.config.get("transcriber.model") == "small"
 
 
 def test_explicit_empty_endpoint_and_models_restore_vendor_defaults_after_restart(tmp_path):
@@ -159,7 +159,7 @@ def test_concurrent_save_serializes_disk_and_runtime_snapshots(tmp_path, monkeyp
     loaded = config_module.load_config(target)
     assert loaded.get("transcriber.hotwords") == "人名"
     assert loaded.get("translator.llm.domain_context") == "访谈"
-    assert loaded.raw == server._config.raw
+    assert loaded.raw == api.app.state.runtime.config.raw
 
 
 def test_failed_candidate_build_preserves_file_runtime_and_current_provider(tmp_path, monkeypatch):
@@ -168,8 +168,8 @@ def test_failed_candidate_build_preserves_file_runtime_and_current_provider(tmp_
     old = "transcriber:\n  provider: faster-whisper\n"
     target.write_text(old, encoding="utf-8")
     api = client()
-    current = server._runner._transcriber
-    previous = deepcopy(server._config.raw)
+    current = api.app.state.runtime.runner._transcriber
+    previous = deepcopy(api.app.state.runtime.config.raw)
 
     def build(_):
         raise RuntimeError("test-only-sensitive-key")
@@ -179,8 +179,8 @@ def test_failed_candidate_build_preserves_file_runtime_and_current_provider(tmp_
     assert response.status_code == 503
     assert "test-only-sensitive-key" not in response.text
     assert target.read_text(encoding="utf-8") == old
-    assert server._config.raw == previous
-    assert server._runner._transcriber is current
+    assert api.app.state.runtime.config.raw == previous
+    assert api.app.state.runtime.runner._transcriber is current
 
 
 def test_prepared_provider_closed_when_save_fails(tmp_path, monkeypatch):
@@ -192,19 +192,19 @@ def test_prepared_provider_closed_when_save_fails(tmp_path, monkeypatch):
     fail_config_write(monkeypatch, paths.default_config_path())
     assert api.post("/api/v1/config", json={"transcriber_provider": "cloud"}).status_code == 503
     assert closed == [True]
-    assert server._runner._transcriber is not prepared
+    assert api.app.state.runtime.runner._transcriber is not prepared
 
 
 def test_successful_save_swaps_prepared_provider_after_disk_commit(tmp_path, monkeypatch):
     from app.services import transcriber
     api = client()
     closed = []
-    monkeypatch.setattr(server._runner._transcriber, "close", lambda: closed.append("old"), raising=False)
+    monkeypatch.setattr(api.app.state.runtime.runner._transcriber, "close", lambda: closed.append("old"), raising=False)
     prepared = SimpleNamespace(name="cloud", close=lambda: closed.append("new"))
     monkeypatch.setattr(transcriber, "build_transcriber", lambda cfg: prepared)
     assert api.post("/api/v1/config", json={"transcriber_provider": "cloud", "asr_model": "new-asr"}).status_code == 200
-    assert server._runner._transcriber is prepared
-    assert prepared._cfg is server._config
+    assert api.app.state.runtime.runner._transcriber is prepared
+    assert prepared._cfg is api.app.state.runtime.config
     assert prepared._cfg.get("transcriber.cloud.model") == "new-asr"
     assert config_module.load_config(paths.default_config_path()).get("transcriber.provider") == "cloud"
     assert closed == ["old"]
@@ -222,7 +222,7 @@ def test_fsync_failure_keeps_old_file_and_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(config_module.os, "fsync", fail)
     assert api.post("/api/v1/config", json={"model": "medium"}).status_code == 503
     assert target.read_text(encoding="utf-8") == old
-    assert server._config.get("transcriber.model") == "small"
+    assert api.app.state.runtime.config.get("transcriber.model") == "small"
     assert list(target.parent.glob(f".{target.name}.*.tmp")) == []
 
 
@@ -237,7 +237,7 @@ def test_whitespace_keys_keep_saved_mock_credentials(tmp_path):
 
 def test_config_get_uses_one_snapshot_during_concurrent_publication(monkeypatch):
     api = client()
-    before = deepcopy(server._config.raw)
+    before = deepcopy(api.app.state.runtime.config.raw)
     before["cookies"] = "旧模拟路径"
     before["pipeline"] = {"max_concurrent": 1}
     before["transcriber"].update(model="small", hotwords="旧姓名")
@@ -261,7 +261,7 @@ def test_config_get_uses_one_snapshot_during_concurrent_publication(monkeypatch)
             return snapshot
 
     switching = SwitchingConfig(before)
-    monkeypatch.setattr(server, "_config", switching)
+    monkeypatch.setattr(api.app.state.runtime, "config", switching)
     response = api.get("/api/v1/config")
     assert response.status_code == 200
     body = response.json()

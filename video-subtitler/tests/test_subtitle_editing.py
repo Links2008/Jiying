@@ -1,4 +1,6 @@
 """下载完成后，修正字幕必须保存并用于重生成，不能重新下载或识别。"""
+from api_test_support import route_endpoint
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,12 +20,12 @@ FIXED = SRT.replace("识别错字", "识别正确")
 @pytest.fixture
 def context(tmp_path):
     app = server.create_app()
-    server._runner._cfg.set("paths.keep_source_video", True)
-    return SimpleNamespace(app=app, runner=server._runner, store=server._store, root=tmp_path)
+    app.state.runtime.runner._cfg.set("paths.keep_source_video", True)
+    return SimpleNamespace(app=app, runner=app.state.runtime.runner, store=app.state.runtime.store, root=tmp_path)
 
 
 def endpoint(context, path, method):
-    return next(r.endpoint for r in context.app.routes if r.path == path and method in r.methods)
+    return route_endpoint(context.app, path, method)
 
 
 def artifact(context, task, name, kind, lang, text=SRT):
@@ -103,7 +105,7 @@ def test_render_uses_selected_language_instead_of_default(context, monkeypatch):
         used.append(Path(subtitle).read_text(encoding="utf-8-sig"))
         output.write_bytes(b"corrected video")
 
-    monkeypatch.setattr("app.pipeline.runner.burn", burn)
+    monkeypatch.setattr("app.pipeline.rendering.burn", burn)
     outputs = context.runner.rerender_subtitles(task["id"], "en", artifact_id=chosen["id"])
     assert used == [FIXED]
     assert outputs[0].read_bytes() == b"corrected video"
@@ -158,7 +160,7 @@ def test_bilingual_edit_survives_render_and_future_edits(context, monkeypatch, m
         output.write_bytes(b"corrected video")
         return output
 
-    monkeypatch.setattr(f"app.pipeline.runner.{'burn' if mode == 'burn' else 'softmux'}", render)
+    monkeypatch.setattr(f"app.pipeline.rendering.{'burn' if mode == 'burn' else 'softmux'}", render)
     for _ in range(2):
         context.runner.rerender_subtitles(task["id"], "zh+en", artifact_id=chosen["id"])
         assert Path(chosen["path"]).read_text(encoding="utf-8-sig") == corrected
@@ -187,7 +189,7 @@ def test_rerender_returns_promptly_and_claims_before_background_work(context, mo
         assert release.wait(5), "测试必须释放渲染线程"
         output.write_bytes(b"corrected video")
 
-    monkeypatch.setattr("app.pipeline.runner.burn", burn)
+    monkeypatch.setattr("app.pipeline.rendering.burn", burn)
     rerender = endpoint(context, "/api/v1/tasks/{tid}/rerender", "POST")
     with ThreadPoolExecutor(max_workers=1) as pool:
         request = pool.submit(rerender, task["id"], {"lang": "zh", "artifact_id": chosen["id"], "background": True})

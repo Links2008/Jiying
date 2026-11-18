@@ -1,5 +1,4 @@
 using System.IO;
-using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using Jiying.Desktop;
@@ -9,8 +8,6 @@ internal static class XiaohongshuLoginRegression
     internal static async Task Run(MainWindow owner, Action<bool, string> check)
     {
         const string url = "https://xhslink.com/o/sample";
-        var type = typeof(PlatformConnectionWindow);
-        var saveMethod = type.GetMethod("TrySaveXiaohongshuLoginAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         var saved = 0;
         var dialog = new PlatformConnectionWindow(owner, "xiaohongshu", url, _ => { saved++; return Task.CompletedTask; });
         check(dialog.Width <= 560 && dialog.Height <= 620, "小红书使用紧凑扫码窗口");
@@ -18,7 +15,6 @@ internal static class XiaohongshuLoginRegression
             "扫码登录不要求选择视频或手工确认");
         check(((Button)dialog.FindName("HomeButton")).Visibility == Visibility.Collapsed,
             "扫码窗口不显示官网浏览入口");
-        check(saveMethod is not null, "小红书自动登录完成只保存真实登录态");
         var input = (TextBox)owner.FindName("UrlBox");
         var previous = input.Text;
         input.Text = url;
@@ -27,9 +23,9 @@ internal static class XiaohongshuLoginRegression
         check(((Expander)owner.FindName("BilibiliLoginAdvanced")).Visibility == Visibility.Collapsed,
             "小红书入口隐藏浏览器与Cookie文件步骤");
         input.Text = previous;
-        if (saveMethod is null) { dialog.Close(); return; }
+
         Task<bool> Save(PlatformConnectionWindow target, bool authenticated, IReadOnlyList<WebsiteCookie> cookies)
-            => (Task<bool>)saveMethod.Invoke(target, [authenticated, cookies])!;
+            => target.TrySaveXiaohongshuLoginAsync(authenticated, cookies);
         WebsiteCookie Cookie(string domain = ".xiaohongshu.com", long expires = 0)
             => new(domain, "web_session", "isolated-test-value", "/", true, true, expires);
         check(!await Save(dialog, false, [Cookie()]) && saved == 0, "访客web_session不会被误判为登录成功");

@@ -11,7 +11,8 @@ from app.core import cancel
 from app.core.config import Config
 from app.core.errors import AppError, Codes
 from app.services.long_asr import _merge_overlap, transcribe_long_audio
-from app.services.transcriber import Segment, Transcript, _timed_word_segments
+from app.services.transcriber import Segment, Transcript
+from app.services.speech_text import _timed_word_segments
 from app.services.video_context import sample_frames
 
 

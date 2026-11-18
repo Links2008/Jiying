@@ -141,7 +141,7 @@ def test_visual_model_receives_actual_image_payload_once_and_frame_evidence(monk
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'choices': [
             {'finish_reason': 'stop', 'message': {'content': reply(number(prompt), {
                 **BACKGROUND, 'evidence_ids': [], 'frame_ids': [1]})}}]})
-    monkeypatch.setattr('requests.post', post)
+    monkeypatch.setattr('requests.Session.post', post)
     assert worker.translate(['first', 'second'], 'en', 'zh') == ['译文1', '译文2']
     image = payloads[0]['messages'][-1]['content'][1]
     assert image['type'] == 'image_url' and image['image_url']['url'] == frame['url']
@@ -157,7 +157,7 @@ def test_pipeline_provides_source_video_without_manual_background(monkeypatch, t
     runner._data = tmp_path
     task = runner.create_task('https://example.test/video', 'best', ['zh'], 'softmux')
     sources = []
-    monkeypatch.setattr('app.pipeline.runner.build_translator', lambda *_: SimpleNamespace(
+    monkeypatch.setattr('app.pipeline.translation.build_translator', lambda *_: SimpleNamespace(
         set_video=lambda path, tid: sources.append((path, tid)), translate=lambda *a, **kw: ['译文']))
     video = tmp_path / 'source.mp4'
     runner._stage_translate(task, Transcript('en', [Segment(0, 1, 'hello')]), ['zh'], video)

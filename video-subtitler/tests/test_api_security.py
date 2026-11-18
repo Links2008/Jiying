@@ -25,6 +25,26 @@ def test_get_tasks_ok_on_localhost(client):
     assert r.status_code == 200
 
 
+def test_local_directory_navigation_is_bounded_to_the_managed_library(client, tmp_path):
+    data = tmp_path / "isolated"
+    root = data / "library"
+    root.mkdir(parents=True)
+    for index in range(503):
+        (root / f"job-{index:03}").mkdir()
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    client.app.state.runtime.data_root = data
+    headers = {"Host": LOCAL_HOST}
+    drives = client.get("/api/v1/fs/drives", headers=headers).json()
+    assert drives == {"home": str(root), "drives": [str(root)]}
+    response = client.get("/api/v1/fs/list", headers=headers).json()
+    assert response["parent"] == "" and response["truncated"] and len(response["dirs"]) == 500
+    assert response["dirs"][0]["name"] == "job-000"
+    nested = client.get("/api/v1/fs/list", headers=headers, params={"path": str(root / "job-000")}).json()
+    assert nested["parent"] == str(root) and nested["dirs"] == [] and not nested["truncated"]
+    assert client.get("/api/v1/fs/list", headers=headers, params={"path": str(outside)}).status_code == 403
+
+
 def test_instance_identifies_bundled_engine(client):
     r = client.get("/api/v1/instance", headers={"Host": LOCAL_HOST})
     assert r.status_code == 200
@@ -67,3 +87,48 @@ def test_llm_key_masked_in_config(client):
     body = r.json()
     assert "llm_api_key" not in body
     assert "llm_api_key_masked" in body
+
+
+@pytest.mark.parametrize("method,path", [
+    ("get", "/api/v1/config"), ("get", "/api/v1/fs/drives"),
+    ("get", "/api/v1/tasks"), ("get", "/api/v1/events"),
+    ("post", "/api/v1/tasks/nonexistent/cancel"),
+])
+def test_paired_engine_requires_bearer(method, path):
+    client = TestClient(server.create_app(session_token="test-paired-engine-token"),
+                        base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
+    assert client.request(method, path).status_code == 401
+    assert client.request(method, path, headers={"Authorization": "Bearer expired-token"}).status_code == 401
+    assert client.request(method, path, params={"token": "test-paired-engine-token"}).status_code == 401
+
+
+def test_paired_discovery_does_not_disclose_token_or_task_state():
+    client = TestClient(server.create_app(session_token="test-paired-engine-token"),
+                        base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
+    result = client.get("/api/v1/instance")
+    assert result.status_code == 200
+    assert result.json() == {"engine_root": str(app_root()), "requires_token": True}
+    assert client.get("/api/v1/tasks", headers={"Authorization": "Bearer test-paired-engine-token"}).status_code == 200
+    assert client.post("/api/v1/tasks/missing/cancel", headers={"Authorization": "Bearer test-paired-engine-token",
+                                                                "Origin": "https://unrelated.example"}).status_code == 403
+
+
+def test_paired_engine_rejects_non_loopback_peer_even_with_token():
+    client = TestClient(server.create_app(session_token="test-paired-engine-token"),
+                        base_url="http://127.0.0.1", client=("192.0.2.12", 50000))
+    assert client.get("/api/v1/config", headers={"Authorization": "Bearer test-paired-engine-token"}).status_code == 403
+
+def test_paired_exit_requires_idle_task_state(monkeypatch):
+    exits = []
+    client = TestClient(server.create_app(session_token="isolated-session", request_exit=lambda: exits.append(True)),
+                        base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
+    headers = {"Authorization": "Bearer isolated-session"}
+    monkeypatch.setattr(client.app.state.runtime.store, "list_tasks", lambda: [{"status": "running"}])
+    assert client.post("/api/v1/session/exit").status_code == 401
+    assert client.post("/api/v1/session/exit", headers=headers).status_code == 409
+    assert not exits
+    monkeypatch.setattr(client.app.state.runtime.store, "list_tasks", lambda: [{"status": "completed"}])
+    assert client.get("/api/v1/session/health", headers=headers).status_code == 204
+    assert client.post("/api/v1/session/exit", headers=headers).status_code == 202
+    assert exits == [True]
+    assert client.post("/api/v1/config", headers=headers, json={}).status_code == 503

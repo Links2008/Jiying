@@ -119,7 +119,7 @@ public partial class PlatformConnectionWindow
         }
     }
 
-    private async Task<bool> TrySaveXiaohongshuLoginAsync(bool authenticated, IReadOnlyList<WebsiteCookie> cookies)
+    internal async Task<bool> TrySaveXiaohongshuLoginAsync(bool authenticated, IReadOnlyList<WebsiteCookie> cookies)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         if (_closed || _savingSession || _sessionSaved || !authenticated || !cookies.Any(cookie =>

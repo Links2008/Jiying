@@ -6,66 +6,39 @@
 from __future__ import annotations
 
 import logging
+import copy
+import hashlib
+import json
 import os
 import re
 import shutil
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from ...core import cancel as task_cancel
 from ...core.errors import AppError, Codes
-from ...core.paths import bin_dir
+from ...core.paths import bin_dir, data_dir
 from ..downloader.aria2c import Aria2cBackend
 from ..renderer import find_ffmpeg
 from ..ytdlp_updater import runtime_session
 from .base import DirectTarget, EngineProvider, FormatInfo, ProbeResult, has_download_bytes
 from .platform_links import is_douyin_url, normalize_media_url
+from .ytdlp_download_errors import (
+    _is_bilibili_url, _is_corrupt_media_error, _quarantine_corrupt_split, _quarantine_failed_split, _ytdlp_error,
+)
+from .ytdlp_formats import (
+    _best_audio, _bilibili_choice, _bilibili_uhd, _format_size, _safe_height,
+    _select_video, _short_edge, _video_formats, _video_priority,
+)
 
 log = logging.getLogger(__name__)
-
-
-def _is_corrupt_media_error(error: AppError) -> bool:
-    return (error.code == Codes.RENDER_FAILED and (
-        error.message == "ffmpeg 视频数据损坏" or "Invalid NAL unit size" in error.detail
-    )) or (error.code == Codes.ENG_FAILED and
-           error.message == "音视频时长不一致，下载文件不完整")
-
-
-def _quarantine_corrupt_split(dest_dir: Path, files: list[Path], merged: Path) -> None:
-    # 已确认媒体损坏时续传会复用完整坏文件；仅隔离本次来源，保留诊断证据。
-    # 放在任务目录旁，避免 has_download_bytes 把隔离文件当作可续传残片。
-    candidates = set(files) | {Path(str(p) + ".aria2") for p in files}
-    candidates |= {merged.with_suffix(".mp4"), merged.with_suffix(".webm")}
-    sources = [p for p in candidates if p.parent == dest_dir and p.is_file()]
-    if not sources:
-        return
-    invalid = dest_dir.parent / f"{dest_dir.name}.invalid-{time.time_ns()}"
-    try:
-        invalid.mkdir()
-        for source in sources:
-            source.replace(invalid / source.name)
-    except OSError as e:
-        raise AppError(Codes.DISK_FAILED, "损坏下载文件无法隔离",
-                       suggestion="删除此失败任务后重新下载；检查临时目录写入权限") from e
-    log.warning("已隔离损坏下载文件，重试将重新获取来源：%s", invalid.name)
-
-
-def _quarantine_failed_split(dest_dir: Path, resolution: str, error: str) -> None:
-    # 旧版失败记录仍在阶段 checkpoint 中；仅迁移与选定格式同标题的拆流来源。
-    record = re.match(r"^\[([^]]+)\] (.*)", error, re.S)
-    if not record or not _is_corrupt_media_error(AppError(
-            record[1], record[2].partition("（")[0], detail=record[2])) or not dest_dir.exists():
-        return
-    matched = [(p, re.fullmatch(r"(.+)\.f(\d+)\.(mp4|m4a|webm)", p.name, re.I))
-               for p in dest_dir.iterdir() if p.is_file()]
-    selected = {m[1] for p, m in matched if m and p.suffix.lower() != ".m4a"
-                and (not resolution.isdecimal() or m[2] == resolution)}
-    for stem in selected:
-        files = [p for p, m in matched if m and m[1] == stem]
-        merged = dest_dir / re.sub(r"\.f\d+", "", files[0].name)
-        _quarantine_corrupt_split(dest_dir, files, merged)
+_media_info_cache = OrderedDict()
+_media_info_lock = threading.Lock()
 
 
 def _display_thumbnail(info: dict) -> str:
@@ -90,65 +63,59 @@ def _import_ytdlp():
         ) from e
 
 
-def _is_bilibili_url(url: str) -> bool:
-    host = (urlsplit(url).hostname or "").lower()
-    return host in ("bilibili.com", "b23.tv") or host.endswith(".bilibili.com")
-
-
-def _ytdlp_error(message: str, stage: str, url: str = "") -> AppError:
-    low = message.lower()
-    if stage == '下载' and 'write to closed file' in low:
-        return AppError(Codes.NET_FAILED, '视频分片下载中断，请重试', detail=message[:1000],
-                        retryable=True, suggestion='已下载的分片保留；网络恢复后重新下载')
-    from .xiaohongshu_public import is_xhs_url
-    if is_xhs_url(url) and '图文笔记' in message:
-        return AppError(Codes.ENG_UNSUPPORTED, '这是小红书图文笔记', suggestion='请复制视频笔记的完整分享链接')
-    if is_xhs_url(url) and ('no video formats' in low or '网页未返回视频地址' in message):
-        return AppError(Codes.AUTH_NEED_COOKIES, '小红书网页尚未提供视频地址',
-                        suggestion='在解析页点击“连接小红书”，打开目标视频后刷新；链接失效时请重新复制完整分享链接')
-    if is_douyin_url(url) and ("fresh cookies" in low or "分享页未返回" in message):
-        return AppError(Codes.ENG_FAILED, "抖音未返回可下载的视频详情",
-                        detail=message[:1000], retryable=True,
-                        suggestion="确认目标视频仍可公开访问，再重新复制视频分享链接；稍后重试")
-    if any(word in low for word in ("cookie", "login", "log in", "sign in", "decrypt", "dpapi")):
-        return AppError(Codes.AUTH_NEED_COOKIES, "登录态未能读取或已失效，请重新连接登录态",
-                        detail=message[:1000],
-                        suggestion=("B 站请在解析页点击“连接 B 站”扫码登录，成功后自动刷新画质；浏览器或 Cookie 文件可作为备用连接方式"
-                                    if _is_bilibili_url(url) else
-                                    "此链接需要对应网站的登录信息；可在高级选项选择已登录该网站的浏览器或有效 Cookie 文件"))
-    if "requested format" in low and "not available" in low:
-        return AppError(Codes.ENG_FAILED, "所选画质已不可用，请刷新画质后重新选择",
-                        detail=message[:1000], retryable=True,
-                        suggestion="返回解析页刷新画质；高画质视频请先检查登录态和账号权限")
-    return AppError(Codes.ENG_FAILED, f"{stage}失败：{message[:200]}",
-                    detail=message[:1000], retryable=True,
-                    suggestion="检查网络和代理后重试；持续失败可在设置中更新下载引擎")
-
-
-def _best_audio(formats: list[dict]) -> dict | None:
-    """yt-dlp 已按偏好从低到高排序，与原生 ba 选择同一音轨。"""
-    return next((f for f in reversed(formats) if f.get("vcodec") == "none"
-                 and f.get("acodec") not in (None, "none")), None)
-
-
-def _format_size(fmt: dict, audio: dict | None = None) -> tuple[int, bool]:
-    streams = [fmt, audio] if fmt.get("acodec") == "none" and audio else [fmt]
-    total, estimated = 0, False
-    for stream in streams:
-        exact = int(stream.get("filesize") or 0)
-        size = exact if exact > 0 else int(stream.get("filesize_approx") or 0)
-        if size <= 0:
-            return 0, False  # 一个必需流未知时，不能把另一条流当成整片大小。
-        total += size
-        estimated |= exact <= 0
-    return total, estimated
-
-
 class YtDlpEngine(EngineProvider):
     name = "ytdlp"
 
     def __init__(self, config):
         self._cfg = config
+
+    def _info_key(self, url):
+        options = self._common_opts()
+        if options.get("cookiesfrombrowser"):
+            return None  # 浏览器登录可能随时改变，不额外读取浏览器状态来缓存。
+        from ..platform_sessions import platform_for_url, session_path
+        paths = [Path(options["cookiefile"])] if options.get("cookiefile") else []
+        platform = platform_for_url(url)
+        if platform:
+            paths.append(session_path(platform))
+        stamps = []
+        for path in paths:
+            try:
+                stat = path.stat()
+                stamps.append((str(path), stat.st_size, stat.st_mtime_ns))
+            except OSError:
+                stamps.append((str(path), 0, 0))
+        version = getattr(getattr(_import_ytdlp(), "version", None), "__version__", "")
+        scope = hashlib.sha256(json.dumps(options, sort_keys=True).encode()).hexdigest()
+        return str(data_dir()), normalize_media_url(url), version, scope, tuple(stamps)
+
+    def _remember_info(self, url, info, key):
+        if key is None or not isinstance(info, dict) or not info.get("formats") or info.get("entries"):
+            return
+        if key != self._info_key(url):
+            return  # 请求期间账号或代理变化，旧响应不能登记到新账号范围。
+        try:
+            snapshot = copy.deepcopy(info)
+        except (TypeError, ValueError, RecursionError):
+            return  # 缓存是优化；特殊提取器的运行状态不能使原本可用的解析失败。
+        with _media_info_lock:
+            _media_info_cache[key] = (time.monotonic() + 60, snapshot)
+            _media_info_cache.move_to_end(key)
+            while len(_media_info_cache) > 32:
+                _media_info_cache.popitem(last=False)
+
+    def _source_info(self, url):
+        key = self._info_key(url)
+        with _media_info_lock:
+            cached = _media_info_cache.get(key)
+            if cached and time.monotonic() < cached[0]:
+                return copy.deepcopy(cached[1])
+            _media_info_cache.pop(key, None)
+        with self._youtube_dl(self._common_opts() | {"quiet": True, "no_warnings": True,
+                                                    "skip_download": True, "noprogress": True}) as ydl:
+            info = self._extract_info(ydl, url, download=False)
+        self._remember_info(url, info, key)
+        return info
 
     def _common_opts(self) -> dict:
         """公共下载参数：重试 + cookies + 代理（按网络模式决定）。
@@ -158,6 +125,15 @@ class YtDlpEngine(EngineProvider):
         公开内容先按网站实际返回的画质下载，权限限制由网站判断。
         """
         opts: dict = {"retries": 3, "socket_timeout": 30}
+        # 安装包自带运行时；源码环境可复用系统安装，无需用户配置 JavaScript。
+        runtimes = {}
+        for runtime in ("deno", "node"):
+            bundled = bin_dir() / (runtime + (".exe" if os.name == "nt" else ""))
+            path = str(bundled) if bundled.is_file() else shutil.which(runtime)
+            if path:
+                runtimes[runtime] = {"path": path}
+        if runtimes:
+            opts["js_runtimes"] = runtimes
         browser = str(self._cfg.get("cookies_from_browser", "") or "").strip()
         if browser:
             opts["cookiesfrombrowser"] = _parse_browser(browser)
@@ -207,21 +183,26 @@ class YtDlpEngine(EngineProvider):
     @runtime_session()
     def probe(self, url: str) -> ProbeResult | None:
         url = normalize_media_url(url)
+        cache_scope = self._info_key(url)
         yt_dlp = _import_ytdlp()
         opts = self._common_opts() | {
             "skip_download": True, "quiet": True, "no_warnings": True, "noprogress": True,
         }
         info = self._head_direct_file(url, "best")
         bilibili = _is_bilibili_url(url)
+        from .xiaohongshu_public import is_xhs_url
+        xhs = is_xhs_url(url)
         auth_status = "unknown" if self._cfg.get("cookies_from_browser") or self._cfg.get("cookies") else "none"
         try:
             if info is None:
                 with self._youtube_dl(opts) as ydl:
                     info = self._extract_info(ydl, url, download=False)
-                    if bilibili and auth_status != "none":
+                    if bilibili or xhs:
                         jar = getattr(ydl, "cookiejar", None)
-                        if jar and any(c.name == "SESSDATA" and c.value
-                                       for c in jar.get_cookies_for_url("https://api.bilibili.com")):
+                        cookie_name = 'SESSDATA' if bilibili else 'web_session'
+                        origin = 'https://api.bilibili.com' if bilibili else 'https://www.xiaohongshu.com'
+                        if jar and any(c.name == cookie_name and c.value
+                                       for c in jar.get_cookies_for_url(origin)):
                             auth_status = "loaded"
         except yt_dlp.utils.DownloadError as e:  # type: ignore[attr-defined]
             msg = str(e)
@@ -230,6 +211,7 @@ class YtDlpEngine(EngineProvider):
                 return None  # 非本引擎职责 → 路由器换下一个引擎
             raise _ytdlp_error(msg, "链接解析", url) from e
 
+        self._remember_info(url, info, cache_scope)
         # 多视频帖子（X/微博等一条链接含多个视频）：extract_info 返回播放列表，
         # 顶层没有 formats —— 不取首个含流条目的话，分辨率列表为空、下载阶段
         # 还会因顶层无 requested_downloads 报“下载完成但未找到产物文件”
@@ -249,70 +231,56 @@ class YtDlpEngine(EngineProvider):
 
         # 同高度的不同帧率/HDR 保留独立选项；同一变体优先提取器画质和码率。
         # 与实际 ba / 拆流选择保持一致；只有所有必需流已知时才给出整片体积。
-        best_audio = _best_audio(info.get("formats") or [])
-        original_formats: list[FormatInfo] = []
-        from .xiaohongshu_public import is_xhs_url
-        xhs = is_xhs_url(url)
-        variants: dict[tuple, FormatInfo] = {}
-        scores: dict[tuple, tuple] = {}
-        for f in info.get("formats") or []:
-            h = f.get("height")
-            if xhs and f.get("format_id") == "direct" and f.get("url"):
-                raw, estimated = _format_size(f, best_audio)
-                original_formats.append(FormatInfo(
-                    format_id="direct", label="原始视频" if h else "原始视频 · 分辨率待确认",
-                    height=h or 0, fps=f.get("fps") or 0.0, ext=f.get("ext", "mp4"),
-                    filesize=raw, size_is_estimate=estimated,
-                    vcodec=f.get("vcodec") or "", acodec=f.get("acodec") or "",
-                    protocol=f.get("protocol", "https")))
-                continue
-            if not h or not f.get("vcodec") or f.get("vcodec") == "none":
-                continue
-            raw, estimated = _format_size(f, best_audio)
-            fps = float(f.get("fps") or 0.0)
+        source_formats = info.get("formats") or []
+        best_audio = _best_audio(source_formats)
+        formats: list[FormatInfo] = []
+        seen: set[tuple] = set()
+        highest = 0
+        highest_uhd = ""
+        for f in sorted(_video_formats(source_formats),
+                        key=lambda fmt: _video_priority(fmt, bilibili), reverse=True):
+            width, height = int(f.get("width") or 0), int(f.get("height") or 0)
+            fps = float(f.get("fps") or 0)
             dynamic_range = str(f.get("dynamic_range") or "SDR")
-            key = (h, fps, dynamic_range)
-            score = (float(f.get("quality") or 0), float(f.get("tbr") or 0),
-                     raw, f.get("ext") == "mp4")
-            if key not in variants or score > scores[key]:
-                scores[key] = score
-                width = int(f.get("width") or 0)
-                quality = min(width, h) if width else h
-                label = "4K / 2160p" if quality == 2160 else f"{quality}p"
-                if width and width < h:
-                    label += f" · {width}×{h}"
-                variants[key] = FormatInfo(
-                    format_id=str(f.get("format_id")), label=label,
-                    height=h, fps=fps, ext=f.get("ext", ""),
-                    filesize=raw, vcodec=f.get("vcodec", ""), acodec=f.get("acodec", ""),
-                    protocol=f.get("protocol", "https"),
-                    dynamic_range=dynamic_range,
-                    size_is_estimate=estimated,
-                )
-        formats = original_formats + sorted(variants.values(), key=lambda x: (-x.height, -x.fps, x.dynamic_range != "SDR"))
-        if not formats:
-            # 直链等无高度信息的格式：保留为「源画质」条目，避免列表为空
-            best = max(info.get("formats") or [],
-                       key=lambda f: f.get("filesize") or f.get("filesize_approx") or 0,
-                       default=None)
-            if best:
-                raw, estimated = _format_size(best, best_audio)
-                formats.append(FormatInfo(
-                    format_id=str(best.get("format_id")), label="source",
-                    height=0, fps=best.get("fps") or 0.0, ext=best.get("ext", ""),
-                    filesize=raw, size_is_estimate=estimated,
-                    vcodec=best.get("vcodec", ""), acodec=best.get("acodec", ""),
-                    protocol=best.get("protocol", "https")))
+            quality = _short_edge(f)
+            original = xhs and f["format_id"] == "direct"
+            variant = (width, height, fps, dynamic_range)
+            if not original and variant in seen:
+                continue
+            if not original:
+                seen.add(variant)
+            highest = max(highest, quality)
+            label = "4K / 2160p" if quality == 2160 else f"{quality}p" if quality else "源画质"
+            if width and height and (width < height or abs(width * 9 - height * 16) > 16):
+                label += f" · {width}×{height}"
+            if original:
+                label = "原始视频 · " + (label if quality else "分辨率待确认")
+            uhd = _bilibili_uhd(f) if bilibili else ""
+            if uhd:
+                highest_uhd = highest_uhd or uhd
+                label = f"{uhd} / 2160p" if uhd == "4K" and quality == 2160 else f"{uhd} · {width}×{height}"
+            raw, estimated = _format_size(f, best_audio)
+            formats.append(FormatInfo(
+                format_id=_bilibili_choice(f) if uhd else str(f["format_id"]),
+                label=label, height=height, fps=fps,
+                ext=f.get("ext") or "", filesize=raw, size_is_estimate=estimated,
+                vcodec=f.get("vcodec") or "", acodec=f.get("acodec") or "",
+                protocol=f.get("protocol") or "https", dynamic_range=dynamic_range))
         quality_notice = ""
+        if xhs and highest and min(info.get('_jiying_source_size') or (0, 0)) > highest:
+            quality_notice = f'当前最高 {highest}p。可连接小红书尝试更多画质。'
         if bilibili:
-            highest = max((f.height for f in formats), default=0)
             if auth_status == "unknown":
-                quality_notice = "未读取到哔哩哔哩登录态，仍可直接下载已列出的公开画质。如需账号画质，可点击“连接 B 站”扫码登录，成功后自动刷新画质；浏览器或 Cookie 文件可作为备用连接方式。"
+                quality_notice = "账号暂不可用，当前画质可直接下载。"
             elif auth_status == "none" and highest < 2160:
-                quality_notice = "当前未登录，可直接下载已列出的公开画质。如原视频支持 4K，可点击“连接 B 站”扫码登录，成功后自动刷新画质；浏览器或 Cookie 文件可作为备用连接方式。"
-            if highest < 2160:
-                quality_notice += f" 当前最高可下载画质为 {highest}p。4K 是否可下载还取决于原视频和账号权限。" if highest else " 当前未返回可确认的分辨率。"
-            elif not quality_notice:
+                quality_notice = "当前画质可直接下载。"
+            if highest_uhd and not quality_notice:
+                quality_notice = f"已获取 B站 {highest_uhd} 画质，可直接选择下载。"
+            elif 0 < highest < 2160 and not highest_uhd:
+                quality_notice = f"当前最高 {highest}p。" + quality_notice
+                if info.get("_jiying_bilibili_advertises_uhd"):
+                    quality_notice += "B站本次未返回可下载的 4K。"
+            elif highest >= 2160 and not quality_notice:
                 quality_notice = "已获取 4K 画质，可直接选择下载。"
         return ProbeResult(
             video_id=str(info.get("id") or ""),
@@ -328,11 +296,30 @@ class YtDlpEngine(EngineProvider):
     @runtime_session()
     def download(self, url: str, resolution: str, dest_dir: Path,
                  on_progress=None, task_id: str | None = None) -> list[Path]:
+        try:
+            return self._download(url, resolution, dest_dir, on_progress, task_id)
+        except BaseException:
+            # 失效媒体地址只影响当前尝试，下次重试会重新向平台获取。
+            try:
+                key = self._info_key(url)
+                with _media_info_lock:
+                    _media_info_cache.pop(key, None)
+            except Exception:
+                pass
+            raise
+
+    def _download(self, url, resolution, dest_dir, on_progress, task_id):
         url = normalize_media_url(url)
+        if resolution.startswith("bili-") and not _is_bilibili_url(url):
+            raise AppError(Codes.ENG_FAILED, "此链接与所选 B站画质不匹配",
+                           suggestion="重新解析目标视频后选择画质")
         # 取消检查器：传入 aria2c 轮询循环与 yt-dlp 进度钩子
         cancel_check = (lambda: task_cancel.is_cancelled(task_id)) if task_id else None
         if task_id:
             task_cancel.raise_if_cancelled(task_id)
+        if resolution == "mixkit-40913-4k":  # 仅识别历史任务的档位标识。
+            raise AppError(Codes.ENG_FAILED, "历史任务的 4K 原素材档已停用",
+                           suggestion="重新解析原链接，选择当前可用的画质")
         direct_info = self._head_direct_file(url, resolution)
 
         bilibili = _is_bilibili_url(url)
@@ -341,7 +328,6 @@ class YtDlpEngine(EngineProvider):
             if task_id:
                 task_cancel.raise_if_cancelled(task_id)
             if split:
-                from ..downloader.native_ranges import download_ranges
                 from ..renderer import mux_av
                 yt_dlp = _import_ytdlp()
                 opts = self._common_opts() | {"quiet": True, "no_warnings": True}
@@ -357,10 +343,7 @@ class YtDlpEngine(EngineProvider):
                         on_progress(progress)
                 log.info("B站原生分段并行：%s", [t.filename for t in split])
                 try:
-                    with self._youtube_dl(opts) as ydl:
-                        files = [download_ranges(ydl, target, dest_dir, native_progress,
-                                 task_id=task_id, concurrency=int(self._cfg.get(
-                                     "download.fragments_concurrency", 16))) for target in split]
+                    files = self._download_native_streams(split, dest_dir, opts, native_progress, task_id)
                 except yt_dlp.utils.DownloadError as error:
                     if task_id:
                         task_cancel.raise_if_cancelled(task_id)
@@ -471,16 +454,9 @@ class YtDlpEngine(EngineProvider):
         if rate:
             opts["ratelimit"] = _parse_rate(rate)
 
-        # 分辨率 → format 字符串（音视频流交给 ffmpeg 自动合并）
-        if resolution in ("best", "bestvideo", ""):
-            fmt = "bv+ba/b"
-        elif re.fullmatch(r"\d{3,4}p", resolution, re.I):
-            h = _safe_height(resolution)
-            fmt = (f"bv[height<={h}]+ba/b[height<={h}]"
-                   f"/bv[height<={h}][ext=mp4]+ba")
-        else:
-            fmt = f"{resolution}[acodec=none]+ba/{resolution}"
-        opts["format"] = fmt
+        if direct_info and resolution == "source":
+            resolution = direct_info["formats"][0]["format_id"]
+        opts["format"] = self._format_selector(resolution, bilibili)
 
         try:
             with self._youtube_dl(opts) as ydl:
@@ -512,9 +488,81 @@ class YtDlpEngine(EngineProvider):
             raise
 
     @staticmethod
+    def _format_selector(resolution: str, bilibili: bool = False):
+        """用实际格式 ID 选择视频，分离流交给 yt-dlp 原生合并。"""
+        def select(context):
+            formats = context["formats"]
+            video = _select_video(formats, resolution, bilibili)
+            if video is None:
+                return
+            if video.get("acodec") != "none" or video.get('_jiying_complete_media'):
+                yield video
+                return
+            audio = _best_audio(formats)
+            if audio is None:
+                if context["incomplete_formats"]:
+                    yield video
+                return
+            # 使用上游的合并选择器，以保留容器及请求字段的标准生成规则。
+            yt_dlp = _import_ytdlp()
+            with yt_dlp.YoutubeDL({"quiet": True, "merge_output_format": "mp4"}, auto_init=False) as selector:
+                scoped = {**context, "formats": [copy.copy(video), copy.copy(audio)]}
+                yield from selector.build_format_selector("bv+ba")(scoped)
+        return select
+
+    def _download_native_streams(self, targets, dest_dir, options, on_progress, task_id):
+        """独立会话并行下载双流，共享连接预算与失败信号。"""
+        from ..downloader.native_ranges import download_ranges, _check_stop
+        from .base import DownloadProgress
+        budget = max(1, min(int(self._cfg.get("download.fragments_concurrency", 16)), 16))
+        workers = min(len(targets), budget)
+        shares = [budget - workers + 1] + [1] * (len(targets) - 1)
+        if workers == 1:
+            shares = [budget] * len(targets)
+        stop, lock = threading.Event(), threading.Lock()
+        fractions, speeds = [0.0] * len(targets), [0.0] * len(targets)
+        weights = [target.filesize for target in targets]
+        if not all(weight > 0 for weight in weights):
+            weights = [1] * len(targets)
+        def report(index, progress):
+            with lock:
+                fractions[index] = max(fractions[index], min(progress.fraction, 1.0))
+                speeds[index] = progress.speed_bps if fractions[index] < 1 else 0
+                fraction = sum(f * w for f, w in zip(fractions, weights)) / sum(weights)
+                on_progress(DownloadProgress(fraction=fraction, speed_bps=sum(speeds),
+                            backend="native-range", note="音视频并行下载"))
+        def download(index):
+            _check_stop(task_id, stop)
+            opts = dict(options)
+            # 限速是本任务总量，不因并行流数翻倍。
+            if opts.get("ratelimit"):
+                opts["ratelimit"] = max(1, int(opts["ratelimit"]) // workers)
+            with self._youtube_dl(opts) as ydl:
+                output = download_ranges(ydl, targets[index], dest_dir,
+                    lambda progress: report(index, progress), task_id=task_id,
+                    concurrency=shares[index], stop_event=stop)
+            report(index, DownloadProgress(fraction=1.0))
+            return output
+        results = [None] * len(targets)
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="jiying-stream") as pool:
+            futures = {pool.submit(download, index): index for index in range(len(targets))}
+            try:
+                for future in as_completed(futures):
+                    results[futures[future]] = future.result()
+            except BaseException:
+                stop.set()
+                for future in futures:
+                    future.cancel()
+                raise
+        return results
+
+    @staticmethod
     def _extract_info(ydl, url: str, download: bool):
         from ..platform_sessions import load_session
         load_session(ydl, url)
+        if _is_bilibili_url(url):
+            from .bilibili_quality import BiliBiliIE
+            ydl.add_info_extractor(BiliBiliIE())
         if is_douyin_url(url):
             from .douyin_public import PublicDouyinIE
             ydl.add_info_extractor(PublicDouyinIE())
@@ -557,13 +605,8 @@ class YtDlpEngine(EngineProvider):
         命中场景：generic 直链（mp4 直链）、progressive 格式（B站部分清晰度）。
         DASH/HLS 分离流返回 None → 走 yt-dlp -N 原生路径。
         """
-        yt_dlp = _import_ytdlp()
-        opts = self._common_opts() | {
-            "skip_download": True, "quiet": True, "no_warnings": True, "noprogress": True,
-        }
         try:
-            with self._youtube_dl(opts) as ydl:
-                info = self._extract_info(ydl, url, download=False)
+            info = self._source_info(url)
         except Exception as e:  # 探测失败不作定论，交给原生路径处理
             log.debug("直达流解析失败，忽略：%s", e)
             return None
@@ -576,7 +619,8 @@ class YtDlpEngine(EngineProvider):
             generic 直链由顶层 url 分支单独处理（无需编解码信息）。
             """
             return (f.get("vcodec") not in (None, "none")
-                    and f.get("acodec") not in (None, "none"))
+                    and (f.get("acodec") not in (None, "none")
+                         or f.get('_jiying_complete_media')))
 
         def is_http(f: dict) -> bool:
             return f.get("protocol") in ("http", "https")
@@ -587,24 +631,8 @@ class YtDlpEngine(EngineProvider):
                      or str(info.get("format_id")) == resolution)):
             return self._target_from(info, info)
 
-        # 情况 2：格式列表中存在音视频合一的 progressive 格式
-        candidates = [f for f in info.get("formats") or []
-                      if f.get("url") and is_av(f) and is_http(f)]
-        if not candidates:
-            return None
-
-        chosen = next((f for f in candidates
-                       if str(f.get("format_id")) == resolution), None)
-        if chosen is None and re.fullmatch(r"\d{3,4}p", resolution, re.I):
-            h = _safe_height(resolution)
-            if h is not None:
-                at_or_below = [f for f in candidates if (f.get("height") or 0) <= h]
-                if at_or_below:
-                    chosen = max(at_or_below, key=lambda f: f.get("height") or 0)
-        if chosen is None and resolution in ("best", "bestvideo", ""):
-            chosen = max(candidates,
-                         key=lambda f: f.get("filesize") or f.get("filesize_approx") or 0)
-        if chosen is None:
+        chosen = _select_video(info.get("formats") or [], resolution)
+        if chosen is None or not chosen.get("url") or not is_av(chosen) or not is_http(chosen):
             return None
         return self._target_from(chosen, info)
 
@@ -613,35 +641,18 @@ class YtDlpEngine(EngineProvider):
 
         命中场景：YouTube/B站等分离流站点；generic 单文件直链返回 None。
         """
-        yt_dlp = _import_ytdlp()
-        opts = self._common_opts() | {
-            "skip_download": True, "quiet": True, "no_warnings": True, "noprogress": True,
-        }
         try:
-            with self._youtube_dl(opts) as ydl:
-                info = self._extract_info(ydl, url, download=False)
+            info = self._source_info(url)
         except Exception as e:
             log.debug("拆流解析失败，忽略：%s", e)
             return None
 
         fmts = info.get("formats") or []
-        videos = [f for f in fmts if f.get("vcodec") not in (None, "none")
-                  and f.get("acodec") == "none" and f.get("url")
-                  and f.get("protocol") in ("http", "https")]
+        v = _select_video(fmts, resolution, _is_bilibili_url(url))
         a = _best_audio(fmts)
-        if not videos or not a or not a.get("url") or a.get("protocol") not in ("http", "https"):
-            return None
-
-        # 视频流按分辨率选；音频与探测及原生 ba 使用同一条。
-        v = next((f for f in videos
-                  if str(f.get("format_id")) == resolution), None)
-        if v is None and re.fullmatch(r"\d{3,4}p", resolution, re.I):
-            h = _safe_height(resolution)
-            below = [f for f in videos if (f.get("height") or 0) <= h]
-            v = max(below, key=lambda f: f.get("height") or 0) if below else None
-        if v is None and resolution in ("best", "bestvideo", ""):
-            v = max(videos, key=lambda f: f.get("height") or 0)
-        if v is None:
+        if (v is None or v.get("vcodec") is None or v.get("acodec") != "none"
+                or not v.get("url") or v.get("protocol") not in ("http", "https")
+                or not a or not a.get("url") or a.get("protocol") not in ("http", "https")):
             return None
         title = info.get("title") or "video"
         safe = re.sub(r'[\\/:*?"<>|]+', "_", title)[:80] or "video"
@@ -651,11 +662,13 @@ class YtDlpEngine(EngineProvider):
                 url=str(v["url"]),
                 filename=f"{safe}.f{v.get('format_id')}.{v.get('ext') or 'mp4'}",
                 headers=dict(v.get("http_headers") or common), kind="video",
+                filesize=int(v.get("filesize") or v.get("filesize_approx") or 0),
                 duration=float(info.get("duration") or 0)),
             DirectTarget(
                 url=str(a["url"]),
                 filename=f"{safe}.f{a.get('format_id')}.{a.get('ext') or 'm4a'}",
                 headers=dict(a.get("http_headers") or common), kind="audio",
+                filesize=int(a.get("filesize") or a.get("filesize_approx") or 0),
                 duration=float(info.get("duration") or 0)),
         ]
 
@@ -746,15 +759,6 @@ def _parse_rate(rate: str) -> int:
         return int(float(rate) * mult)
     except ValueError:
         return 0
-
-
-def _safe_height(resolution: str) -> int | None:
-    """"1080p"/"1080" → 1080；无法解析（如 "sb2"、"hls-1080" 之外的怪值）返回 None。
-
-    format_id 不一定是纯数字 —— 直接 int() 会让任务崩掉。
-    """
-    m = re.search(r"(\d{3,4})\s*p?$", str(resolution).strip(), re.I)
-    return int(m.group(1)) if m else None
 
 
 def _parse_browser(spec: str) -> tuple:

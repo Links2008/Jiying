@@ -9,7 +9,7 @@ import json
 import queue
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 
 @dataclass
@@ -27,6 +27,7 @@ class AppEvent:
     backend: str = ""        # native | aria2c
     note: str = ""           # 当前动作说明，如 "aria2c 双流并行"
     ts: float = field(default_factory=time.time)
+    sequence: int = 0
 
     def to_sse(self) -> str:
         return f"data: {json.dumps(asdict(self), ensure_ascii=False)}\n\n"
@@ -37,12 +38,21 @@ class EventBus:
         self._subs: list[queue.Queue] = []
         self._lock = threading.Lock()
         self._max = max_queue
+        self._sequence = 0
+
+    @property
+    def sequence(self) -> int:
+        with self._lock:
+            return self._sequence
 
     def subscribe(self) -> queue.Queue:
+        return self.subscribe_with_sequence()[0]
+
+    def subscribe_with_sequence(self) -> tuple[queue.Queue, int]:
         q: queue.Queue = queue.Queue(maxsize=self._max)
         with self._lock:
             self._subs.append(q)
-        return q
+            return q, self._sequence
 
     def unsubscribe(self, q: queue.Queue) -> None:
         with self._lock:
@@ -51,12 +61,13 @@ class EventBus:
 
     def publish(self, event: AppEvent) -> None:
         with self._lock:
-            subs = list(self._subs)
-        for q in subs:
-            try:
-                q.put_nowait(event)
-            except queue.Full:
-                pass  # 慢消费者丢事件而非阻塞流水线
+            self._sequence += 1
+            event = replace(event, sequence=self._sequence)
+            for q in self._subs:
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    pass  # 序号缺口由客户端用快照恢复。
 
 
 # 进程级单例：CLI 与 API 服务共用

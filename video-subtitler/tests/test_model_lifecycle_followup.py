@@ -40,7 +40,7 @@ def test_switching_provider_releases_the_idle_model_and_maintenance_thread(tmp_p
 
 
 @pytest.mark.parametrize('idle_minutes', [0, 10])
-def test_switching_provider_does_not_block_or_unload_active_inference(tmp_path, monkeypatch, idle_minutes):
+def test_switching_provider_does_not_block_or_unload_active_inference(tmp_path, monkeypatch, idle_minutes, pcm_file):
     config = Config({'transcriber': {'provider': 'faster-whisper', 'idle_unload_minutes': idle_minutes}})
     runner = PipelineRunner(config, Store(tmp_path / 'tasks.db'))
     previous = runner._transcriber
@@ -54,9 +54,10 @@ def test_switching_provider_does_not_block_or_unload_active_inference(tmp_path, 
         assert release.wait(3)
         return [Segment(0, 1, 'Complete speech.')], SimpleNamespace(duration=1, language='en')
     monkeypatch.setattr(previous, '_run_model', infer)
+    audio = pcm_file()
     def work():
         try:
-            outcomes.append(previous.transcribe(tmp_path / 'unused.wav'))
+            outcomes.append(previous.transcribe(audio))
         except Exception as error:
             errors.append(error)
     thread = threading.Thread(target=work)
@@ -75,7 +76,7 @@ def test_switching_provider_does_not_block_or_unload_active_inference(tmp_path, 
     assert eventually_gone(model), '推理完成后必须释放旧模型'
 
 
-def test_retired_provider_allows_existing_task_nested_calls_but_rejects_new_tasks(tmp_path, monkeypatch):
+def test_retired_provider_allows_existing_task_nested_calls_but_rejects_new_tasks(monkeypatch, pcm_file):
     worker = FasterWhisperTranscriber(Config({'transcriber': {'idle_unload_minutes': 0}}))
     worker._model = ModelToken()
     model = weakref.ref(worker._model)
@@ -83,12 +84,13 @@ def test_retired_provider_allows_existing_task_nested_calls_but_rejects_new_task
     monkeypatch.setattr(worker, '_run_model', lambda *a, **kw: (
         [Segment(0, 1, 'Existing task.')], SimpleNamespace(duration=1, language='en')))
     errors = []
+    audio = pcm_file()
     with worker.lease():
         worker.close()
-        assert worker.transcribe(tmp_path / 'unused.wav').segments == [Segment(0, 1, 'Existing task.')]
+        assert worker.transcribe(audio).segments == [Segment(0, 1, 'Existing task.')]
         def new_task():
             try:
-                worker.transcribe(tmp_path / 'unused.wav')
+                worker.transcribe(audio)
             except AppError as error:
                 errors.append(error.code)
         thread = threading.Thread(target=new_task)

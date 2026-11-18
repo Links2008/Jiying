@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 _FACTORY = {e.name: e for e in (YtDlpEngine, YouGetEngine, LuxEngine)}
 PROBE_TTL_HOURS = 24
-PROBE_CACHE_VER = 7  # 新链接入口与抖音多画质更新后重新解析，避免复用旧格式ID。
+PROBE_CACHE_VER = 13  # 旧缓存中的外部原素材档已退出。
 
 
 def _ytdlp_ver() -> str:
@@ -45,14 +45,17 @@ class EngineRouter:
     @runtime_session()
     def probe(self, url: str, use_cache: bool = True) -> tuple[EngineProvider, ProbeResult]:
         """返回 (命中的引擎, 探测结果)；全部失败抛 E-ENG-201。"""
-        cache_file = self._probe_cache_path(url)
-        if use_cache and self._store:
-            cached = self._store.cache_get(self._probe_key(url))
+        scope = YtDlpEngine(self._cfg)._info_key(url)
+        cache_key = self._probe_key(json.dumps((url, scope), sort_keys=True)) if scope else None
+        cache_file = self._probe_cache_path(cache_key) if cache_key else None
+        if use_cache and self._store and cache_key:
+            cached = self._store.cache_get(cache_key)
             if cached and Path(cached).exists():
                 try:
                     data = json.loads(Path(cached).read_text(encoding="utf-8"))
                     if (data.get("v") != PROBE_CACHE_VER
-                            or data.get("ytdlp") != _ytdlp_ver()):
+                            or data.get("ytdlp") != _ytdlp_ver()
+                            or scope != YtDlpEngine(self._cfg)._info_key(url)):
                         raise KeyError("缓存版本过期")  # 引擎已更新，重新探测
                     data["result"]["formats"] = [
                         FormatInfo(**f) for f in data["result"].get("formats", [])]
@@ -70,14 +73,15 @@ class EngineRouter:
             log.info("使用引擎 %s 探测 %s", eng.name, url)
             result = eng.probe(url)
             if result is not None:
-                if self._store and cache_file:
+                if (self._store and cache_file
+                        and scope == YtDlpEngine(self._cfg)._info_key(url)):
                     cache_file.parent.mkdir(parents=True, exist_ok=True)
                     try:
                         payload = {"v": PROBE_CACHE_VER, "ytdlp": _ytdlp_ver(),
                                    "engine": eng.name, "result": asdict(result)}
                         cache_file.write_text(json.dumps(payload, ensure_ascii=False),
                                               encoding="utf-8")
-                        self._store.cache_put(self._probe_key(url), "probe",
+                        self._store.cache_put(cache_key, "probe",
                                               str(cache_file), PROBE_TTL_HOURS)
                     except OSError:
                         pass
@@ -139,8 +143,8 @@ class EngineRouter:
     def _probe_key(url: str) -> str:
         return "probe:" + hashlib.sha1(url.encode()).hexdigest()
 
-    def _probe_cache_path(self, url: str) -> Path:
-        return data_dir() / "cache" / "probe" / f"{self._probe_key(url)}.json"
+    def _probe_cache_path(self, cache_key: str) -> Path:
+        return data_dir() / "cache" / "probe" / f"{cache_key.split(':')[-1]}.json"
 
 
 def _Factory(name: str, config) -> EngineProvider:  # noqa: N802（保持注册表写法直观）

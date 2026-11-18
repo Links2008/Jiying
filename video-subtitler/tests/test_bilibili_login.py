@@ -122,8 +122,8 @@ def test_poll_expires_locally_after_180_seconds(login_client, monkeypatch):
 
 def test_connected_atomically_saves_netscape_config_and_is_idempotent(login_client):
     client, sessions = login_client
-    server._config.raw.update(cookies="old-path", cookies_from_browser="edge", user_custom="keep")
-    server._store.cache_put("old-probe", "probe", "test-probe.json", ttl_hours=1)
+    client.app.state.runtime.config.raw.update(cookies="old-path", cookies_from_browser="edge", user_custom="keep")
+    client.app.state.runtime.store.cache_put("old-probe", "probe", "test-probe.json", ttl_hours=1)
     login = start(client)
     sessions[-1].states = [0]
     first = poll(client, login["session_id"])
@@ -139,7 +139,7 @@ def test_connected_atomically_saves_netscape_config_and_is_idempotent(login_clie
     assert saved["cookies"] == str(cookiefile)
     assert saved["cookies_from_browser"] == ""
     assert saved["user_custom"] == "keep"
-    assert server._store.cache_get("old-probe") is None
+    assert client.app.state.runtime.store.cache_get("old-probe") is None
     assert sessions[-1].closed
     assert poll(client, login["session_id"]).json() == first.json()
     assert len(sessions[-1].calls) == 2
@@ -149,7 +149,7 @@ def test_connected_atomically_saves_netscape_config_and_is_idempotent(login_clie
 def test_login_failure_does_not_claim_connected_or_replace_old_config(login_client, monkeypatch, failure):
     from app.services import bilibili_login
     client, sessions = login_client
-    server._config.raw.update(cookies="old-path", cookies_from_browser="edge")
+    client.app.state.runtime.config.raw.update(cookies="old-path", cookies_from_browser="edge")
     cookiefile = paths.data_dir() / "bilibili-cookies.txt"
     cookiefile.write_text("old-cookie-file", encoding="utf-8")
     login = start(client)
@@ -163,8 +163,8 @@ def test_login_failure_does_not_claim_connected_or_replace_old_config(login_clie
     response = poll(client, login["session_id"])
     assert response.status_code == 503
     assert SECRET not in response.text
-    assert server._config.get("cookies") == "old-path"
-    assert server._config.get("cookies_from_browser") == "edge"
+    assert client.app.state.runtime.config.get("cookies") == "old-path"
+    assert client.app.state.runtime.config.get("cookies_from_browser") == "edge"
     assert cookiefile.read_text(encoding="utf-8") == "old-cookie-file"
 
 
@@ -191,7 +191,7 @@ def test_generate_rejects_non_string_url_and_key_with_safe_error(login_client, m
 def test_confirmed_login_retries_config_save_without_another_scan_or_poll(login_client, monkeypatch):
     from app.core import config
     client, sessions = login_client
-    server._config.raw.update(cookies="old-path", cookies_from_browser="edge")
+    client.app.state.runtime.config.raw.update(cookies="old-path", cookies_from_browser="edge")
     login = start(client)
     sessions[-1].states = [0]
     replace = config.os.replace
@@ -206,7 +206,7 @@ def test_confirmed_login_retries_config_save_without_another_scan_or_poll(login_
     failed = poll(client, login["session_id"])
     assert failed.status_code == 503
     assert SECRET not in failed.text
-    assert server._config.get("cookies_from_browser") == "edge"
+    assert client.app.state.runtime.config.get("cookies_from_browser") == "edge"
     failing[0] = False
     assert poll(client, login["session_id"]).json()["status"] == "connected"
     assert len(sessions[-1].calls) == 2

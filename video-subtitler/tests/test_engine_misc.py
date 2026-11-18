@@ -76,7 +76,7 @@ def test_burn_color_and_middle_offset(tmp_path):
     srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n示例字幕\n", encoding="utf-8")
     _write_positioned_ass(srt, ass, "middle", 30)
     text = ass.read_text(encoding="utf-8")
-    assert r"\an5\pos(320,210)" in text
+    assert r"\an5\pos(192,168)" in text
     assert "示例字幕" in text
 
 
@@ -85,7 +85,7 @@ def test_dragged_subtitle_position_survives_task_storage(tmp_path):
     ass = tmp_path / "sample.ass"
     srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nDrag me\n", encoding="utf-8")
     _write_positioned_ass(srt, ass, "middle", 30, horizontal_offset=96)
-    assert r"\an5\pos(416,210)" in ass.read_text(encoding="utf-8")
+    assert r"\an5\pos(249.6,168)" in ass.read_text(encoding="utf-8")
     store = Store(tmp_path / "tasks.db")
     task = store.create_task("https://example.com/a.mp4", "best", [], "burn",
                              horizontal_offset=96, vertical_offset=30)

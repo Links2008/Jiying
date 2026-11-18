@@ -4,10 +4,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="DesktopRaceRegression/**/*.cs" />
-    <Compile Include="../../Jiying.Desktop/EngineClient.cs" Link="EngineClient.cs" />
-    <Compile Include="../../Jiying.Desktop/Models.cs" Link="Models.cs" />
+    <Compile Include="*.cs" />
+    <ProjectReference Include="../../Jiying.Core/Jiying.Core.csproj" />
   </ItemGroup>
 </Project>

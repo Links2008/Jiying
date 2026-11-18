@@ -1,0 +1,81 @@
+name: 即影构建与回归
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jiying-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows 构建与回归
+    runs-on: windows-2025
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            video-subtitler/requirements.txt
+            video-subtitler/requirements-dev.txt
+      - name: 安装后端依赖
+        run: python -m pip install -r video-subtitler/requirements-dev.txt
+      - name: 准备媒体工具
+        shell: pwsh
+        run: ./scripts/prepare-ci-media.ps1 -OutputDir (Join-Path $env:RUNNER_TEMP 'media-tools')
+      - name: 构建并运行后端、字幕及 WPF 回归
+        shell: pwsh
+        run: |
+          $media = Join-Path $env:RUNNER_TEMP 'media-tools'
+          ./scripts/test.ps1 -Ffmpeg (Join-Path $media 'ffmpeg.exe') -Aria2 (Join-Path $media 'aria2c.exe') -OutputDir (Join-Path $env:RUNNER_TEMP 'reports')
+      - name: 验证 Python wheel 元数据
+        shell: pwsh
+        run: |
+          python -m pip wheel --no-deps ./video-subtitler -w (Join-Path $env:RUNNER_TEMP 'wheel')
+          python ./scripts/check-wheel-version.py (Join-Path $env:RUNNER_TEMP 'wheel')
+      - name: 构建冻结引擎并校验桌面版本
+        shell: pwsh
+        run: |
+          $media = Join-Path $env:RUNNER_TEMP 'media-tools'
+          $package = Join-Path $env:RUNNER_TEMP 'jiying-build'
+          ./scripts/build-windows.ps1 -MediaBin $media -OutputDir $package
+          $smoke = (New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'jiying-smoke')).FullName
+          $env:LOCALAPPDATA = $smoke
+          $env:APPDATA = $smoke
+          $env:TEMP = $smoke
+          $env:TMP = $smoke
+          $env:JIYING_UI_SETTINGS_PATH = Join-Path $smoke 'native-ui.json'
+          $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = Join-Path $smoke 'bundle'
+          $desktop = Join-Path $package 'app/Jiying.Native.exe'
+          $process = Start-Process -FilePath $desktop -WorkingDirectory (Split-Path $desktop -Parent) -ArgumentList '--self-test' -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw '冻结桌面自检失败。' }
+          $engine = Join-Path $package 'app/engine/JiyingEngine.exe'
+          python ./scripts/check-frozen-engine.py $engine $smoke
+      - name: 保存测试报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: jiying-windows-test-reports
+          path: |
+            ${{ runner.temp }}/reports/*.log
+            ${{ runner.temp }}/reports/*.xml
+            ${{ runner.temp }}/reports/*.trx
+          if-no-files-found: warn

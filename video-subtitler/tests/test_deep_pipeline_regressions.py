@@ -1,4 +1,6 @@
 """深度回归：完整内容、异常响应、缓存恢复与资源等待取消；不连接真实服务。"""
+from api_test_support import route_endpoint
+
 import json
 import math
 import struct
@@ -13,10 +15,13 @@ from app.core import cancel
 from app.core.config import Config
 from app.core.errors import AppError, Codes
 from app.models.db import Store
+from app.pipeline import speech
+from app.pipeline import resources
 from app.pipeline import runner as pipeline
 from app.services.long_asr import transcribe_long_audio
 from app.services.subtitler import read_srt
-from app.services.transcriber import CloudAsrTranscriber, Segment, Transcript, _timed_word_segments
+from app.services.transcriber import CloudAsrTranscriber, Segment, Transcript
+from app.services.speech_text import _timed_word_segments
 from app.services.translator import LLMTranslator
 
 
@@ -95,7 +100,7 @@ def test_translation_malformed_service_response_is_retried_before_failing(monkey
         payload = response if len(calls) == 1 else {
             'choices': [{'message': {'content': '1. 完整译文。'}, 'finish_reason': 'stop'}]}
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: payload)
-    monkeypatch.setattr('requests.post', request)
+    monkeypatch.setattr('requests.Session.post', request)
     monkeypatch.setattr('app.services.translator.time.sleep', lambda _: None)
     worker = LLMTranslator(Config({'translator': {'llm': {
         'base_url': 'https://example.test/v1', 'model': 'test'}}}))
@@ -133,7 +138,7 @@ def test_invalid_final_transcript_checkpoint_is_recovered_instead_of_failing_eve
 
 @pytest.mark.parametrize('stage', ['download', 'extract', 'render'])
 def test_resource_waiting_task_can_cancel_before_other_jobs_release_the_pool(tmp_path, monkeypatch, stage):
-    runner = pipeline.PipelineRunner(Config({}), Store(tmp_path / 'tasks.db'))
+    runner = pipeline.PipelineRunner(Config({"render": {"encoder": "cpu"}}), Store(tmp_path / 'tasks.db'))
     runner._data = tmp_path / 'data'
     task = runner.create_task('https://example.test/clip', 'best', [], 'burn')
     entered, finished = threading.Event(), threading.Event()
@@ -150,12 +155,17 @@ def test_resource_waiting_task_can_cancel_before_other_jobs_release_the_pool(tmp
             self.acquire()
         def __exit__(self, *a):
             self.release()
-    monkeypatch.setitem(pipeline._POOLS, 'io' if stage == 'download' else 'cpu', WaitingPool())
+    monkeypatch.setitem(resources._POOLS, 'io' if stage == 'download' else 'cpu', WaitingPool())
     if stage in ('extract', 'render'):
         runner._stage_download = lambda *_: tmp_path / 'video.mp4'
-        monkeypatch.setattr(pipeline, 'extract_audio', lambda *a, **kw: tmp_path / 'audio.wav')
+        monkeypatch.setattr(speech, 'extract_audio', lambda *a, **kw: tmp_path / 'audio.wav')
     if stage == 'render':
         from app.services.subtitler import save_srt
+        from app.services import renderer
+        monkeypatch.setattr(renderer, 'audio_args', lambda *a, **kw: [])
+        monkeypatch.setattr(renderer, 'find_ffmpeg', lambda *_: 'ffmpeg')
+        monkeypatch.setattr(renderer, '_run', lambda *a, **kw: pytest.fail("等待资源的烧录不能启动子进程"))
+        task['font_name'] = 'Arial'
         runner._stage_extract = lambda *_: tmp_path / 'audio.wav'
         transcript = Transcript('en', [Segment(0, 1, 'Isolated speech.')])
         captions = save_srt(transcript.segments, tmp_path / 'captions.srt')
@@ -224,12 +234,12 @@ def test_invalid_language_is_rejected_before_network_probe_or_task_creation(monk
     app = server.create_app()
     def forbidden_probe(*a, **kw):
         raise AssertionError('无效语言参数不能触发探测请求')
-    monkeypatch.setattr(server._router, 'probe', forbidden_probe)
-    submit = next(r.endpoint for r in app.routes if r.path == '/api/v1/tasks' and 'POST' in r.methods)
+    monkeypatch.setattr(app.state.runtime.router, 'probe', forbidden_probe)
+    submit = route_endpoint(app, '/api/v1/tasks', 'POST')
     with pytest.raises(HTTPException) as error:
         submit(server.TaskIn(url='https://example.test/video', **options))
     assert error.value.status_code == 422
-    assert server._store.list_tasks() == []
+    assert app.state.runtime.store.list_tasks() == []
 
 
 def test_recovering_invalid_final_cache_reuses_all_valid_parts_and_preserves_diagnostic_copy(tmp_path):
@@ -262,7 +272,7 @@ def test_recovering_invalid_final_cache_reuses_all_valid_parts_and_preserves_dia
 
 def test_translation_repeated_malformed_responses_fail_cleanly_without_creating_a_checkpoint(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr('requests.post', lambda *a, **kw:
+    monkeypatch.setattr('requests.Session.post', lambda *a, **kw:
                         calls.append(kw['json']) or SimpleNamespace(raise_for_status=lambda: None,
                                                                   json=lambda: {'choices': []}))
     monkeypatch.setattr('app.services.translator.time.sleep', lambda _: None)

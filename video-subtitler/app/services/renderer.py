@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -13,12 +14,18 @@ import shutil
 import tempfile
 import subprocess
 import time
-from contextlib import ExitStack, contextmanager
+import threading
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 
 from ..core import cancel
 from ..core.errors import AppError, Codes, dep_missing
 from ..core.paths import bin_dir
+from ..pipeline.resources import resource_slot
+from . import cuda_overlay
+from .ass_document import parse_ass
+from .media_info import STREAM_ENTRIES, VideoTraits as _VideoTraits, find_ffprobe, positive_ratio, traits_from_probe
+from .subtitle_filters import _ass_filter, _subtitle_filter, _write_positioned_ass
 from .translator import LANG_CODES, LANG_NAMES
 
 log = logging.getLogger(__name__)
@@ -27,17 +34,6 @@ log = logging.getLogger(__name__)
 # Windows 会给每个子进程分配一个新的控制台窗口（黑框弹窗）。预览/烧录会
 # 反复调用 ffmpeg，故必须全局抑制。
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-
-# 字幕位置 → Alignment。注意：ffmpeg+libass 对 SRT force_style 的编号与
-# ASS 标准不一致，以下为逐值实测的经验映射（2=底部居中 6=顶部居中 10=中部居中）
-POSITIONS = {"bottom": 2, "middle": 10, "top": 6}
-
-# ffmpeg 路径转义：单引号需穿透两层解析（filtergraph 层 + subtitles 滤镜层）。
-# 引号内 \ 不是转义符、' 必收尾，故用「收尾引号 + 转义反斜杠 + 转义引号
-# + 重开引号」写法：第一层吐出 \' 、第二层还原为字面 '。否则标题含撇号
-# （如 Don't Look Up）时滤镜解析失败 → 烧录零产物。
-_QUOTE_ESC = "'" + r"\\" + r"\'" + "'"
-
 
 def find_ffmpeg(config) -> str:
     """定位 ffmpeg：配置路径 → bin/ 内置 → PATH。"""
@@ -137,9 +133,15 @@ def audio_args(config, video: Path, out_path: Path,
     """音轨参数：目标为 mp4/mov 且源音轨不兼容时转 AAC，否则无损流复制。"""
     if task_id:
         cancel.raise_if_cancelled(task_id)
+    if out_path.suffix.lower() not in (".mp4", ".m4v", ".mov"):
+        return ["-c:a", "copy"]
+    codecs = _AUDIO_RE.findall(_probe_media(config, video, task_id))
+    return _audio_output_args(codecs, video, out_path)
+
+
+def _audio_output_args(codecs, video: Path, out_path: Path) -> list[str]:
     if out_path.suffix.lower() in (".mp4", ".m4v", ".mov"):
         # 软封装保留所有音轨；首条 AAC 不能代表后面的 PCM/Vorbis 也兼容。
-        codecs = _AUDIO_RE.findall(_probe_media(config, video, task_id))
         unsupported = [codec for codec in codecs if codec.lower() not in _MP4_SAFE_AUDIO]
         if unsupported:
             log.info("源音轨 %s 不适配 %s，改转 AAC：%s",
@@ -150,37 +152,79 @@ def audio_args(config, video: Path, out_path: Path,
 
 _TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 
-# 硬件编码器 → ffmpeg 参数（VBR 质量优先；p4 是 NVENC 质量/速度平衡档）。
-# NVENC 只依赖显卡驱动（不需要 CUDA 运行库），RTX 系列烧录 1080p 可达数倍实时速度，
-# 且几乎不占 CPU —— 桌面常驻应用的关键减负点
+# 硬件编码器 → ffmpeg 参数；NVENC 使用较快预设和较低量化值保留画质。
+# NVENC 只依赖显卡驱动；字幕像素由 libass 生成，可按素材选择显卡内混合。
 _HW_ENCODERS = {
-    "h264_nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr",
-                   "-cq", "19", "-b:v", "0"],
+    "h264_nvenc": ["-c:v", "h264_nvenc", "-preset", "p3", "-rc", "vbr",
+                   "-cq", "18", "-b:v", "0"],
     "h264_qsv": ["-c:v", "h264_qsv", "-global_quality", "19"],
     "h264_amf": ["-c:v", "h264_amf", "-quality", "quality"],
+    "av1_nvenc": ["-c:v", "av1_nvenc", "-preset", "p3", "-rc", "vbr", "-cq", "18", "-b:v", "0"],
+    "av1_qsv": ["-c:v", "av1_qsv", "-global_quality", "19"],
+    "hevc_nvenc": ["-c:v", "hevc_nvenc", "-preset", "p3", "-rc", "vbr", "-cq", "18", "-b:v", "0",
+                   "-profile:v", "main10", "-pix_fmt", "p010le", "-tag:v", "hvc1"],
+    "hevc_qsv": ["-c:v", "hevc_qsv", "-global_quality", "19", "-profile:v", "main10",
+                 "-pix_fmt", "p010le", "-tag:v", "hvc1"],
+    "hevc_amf": ["-c:v", "hevc_amf", "-quality", "quality", "-profile:v", "main10",
+                 "-pix_fmt", "p010le", "-tag:v", "hvc1"],
 }
 _CPU_ENCODER_ARGS = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]
-_encoder_cache: dict[str, bool] = {}
+_CPU_10BIT_ARGS = ["-c:v", "libx265", "-preset", "fast", "-crf", "18",
+                   "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1"]
+_encoder_cache: dict[tuple, bool] = {}
+_usable_encoder_cache: dict[tuple, tuple[float, bool]] = {}
+_encoder_lock = threading.Lock()
+
+
+def _encoder_key(config, name: str) -> tuple:
+    executable = find_ffmpeg(config)
+    try:
+        stamp = Path(executable).stat().st_mtime_ns
+    except OSError:
+        stamp = 0
+    return executable, stamp, name
 
 
 def has_encoder(config, name: str) -> bool:
     """ffmpeg 是否编译了指定编码器（每进程只探测一次）。"""
-    if name not in _encoder_cache:
+    key = _encoder_key(config, name)
+    if key not in _encoder_cache:
         try:
             out = subprocess.run([find_ffmpeg(config), "-hide_banner", "-encoders"],
                                  capture_output=True, text=True, timeout=30,
                                  creationflags=_NO_WINDOW)
-            _encoder_cache[name] = name in (out.stdout or "")
+            _encoder_cache[key] = name in (out.stdout or "")
         except (OSError, subprocess.SubprocessError):
-            _encoder_cache[name] = False
-    return _encoder_cache[name]
+            _encoder_cache[key] = False
+    return _encoder_cache[key]
+
+
+def encoder_usable(config, name: str) -> bool:
+    """以一帧真实编码验证驱动；能力缓存随 FFmpeg 变化失效。"""
+    if not has_encoder(config, name):
+        return False
+    key = _encoder_key(config, name)
+    with _encoder_lock:
+        cached = _usable_encoder_cache.get(key)
+        if cached and time.monotonic() - cached[0] < (600 if cached[1] else 30):
+            return cached[1]
+        try:
+            result = subprocess.run([key[0], "-v", "error", "-f", "lavfi", "-i",
+                "color=c=black:s=320x180:r=30", "-frames:v", "1", "-an",
+                *_HW_ENCODERS[name], "-f", "null", "-"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=8, creationflags=_NO_WINDOW)
+            available = result.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            available = False
+        _usable_encoder_cache[key] = (time.monotonic(), available)
+        return available
 
 
 def pick_encoder(config) -> str:
-    """render.encoder 配置：cpu 固定软编；auto 按构建/驱动顺序择优。
+    """render.encoder 配置：cpu 固定软编；auto 按实际可用的驱动顺序择优。
 
-    注意 auto 只代表「优先尝试」，驱动层面不可用时 burn() 会在运行期
-    自动回退 libx264（编码器列表里有 ≠ 当前机器真能用）。
+    一帧能力检查不能保证资源一直可用；运行期的硬件故障会尝试其他可用编码器。
     """
     pref = str(config.get("render.encoder", "auto") or "auto").lower()
     if pref == "cpu":
@@ -188,13 +232,42 @@ def pick_encoder(config) -> str:
     if pref != "auto":
         return pref
     for name in _HW_ENCODERS:
-        if has_encoder(config, name):
+        if name.startswith("h264_") and encoder_usable(config, name):
             return name
     return "libx264"
 
 
+def _video_traits(video: Path, config=None, task_id: str | None = None) -> _VideoTraits:
+    """读取实际视频位深和基础色彩标记，避免 10 位源进入 8 位编码路径。"""
+    probe = find_ffprobe(config)
+    if not probe or not video.is_file():
+        return _VideoTraits()
+    try:
+        with tempfile.TemporaryFile() as output:
+            _run([probe, "-v", "error", "-show_entries", STREAM_ENTRIES, "-of", "json", "-i", str(video)],
+                 timeout=_DURATION_PROBE_TIMEOUT, stdout=output, task_id=task_id)
+            output.seek(0)
+            return traits_from_probe(json.load(output))
+    except AppError as error:
+        if error.code == Codes.TASK_CANCELLED:
+            raise
+    except (OSError, ValueError, TypeError, AttributeError):
+        if task_id:
+            cancel.raise_if_cancelled(task_id)
+    return _VideoTraits()
+
+
+def _pick_10bit_encoder(config) -> str:
+    preference = str(config.get("render.encoder", "auto") or "auto").lower()
+    if preference == "cpu":
+        return "libx265"
+    names = (name for name in _HW_ENCODERS if name.startswith("hevc_")) if preference == "auto" else (
+        preference.replace("h264_", "hevc_"),)
+    return next((name for name in names if name in _HW_ENCODERS and encoder_usable(config, name)), "libx265")
+
+
 def _run(args: list[str], timeout: int = 7200, task_id: str | None = None,
-         on_time=None) -> None:
+         on_time=None, stdout=subprocess.DEVNULL) -> None:
     """执行 ffmpeg 子进程：轮询等待以支持任务取消与超时。
 
     stderr 写入临时文件而非 PIPE：轮询期间无人排空管道，ffmpeg 的日志
@@ -207,7 +280,7 @@ def _run(args: list[str], timeout: int = 7200, task_id: str | None = None,
     import tempfile
     with tempfile.TemporaryFile() as errf:
         log.info('ffmpeg 命令: %s', args)
-        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=errf,
+        proc = subprocess.Popen(args, stdout=stdout, stderr=errf,
                                 creationflags=_NO_WINDOW)
         if task_id:
             cancel.register(task_id, proc)
@@ -225,7 +298,7 @@ def _run(args: list[str], timeout: int = 7200, task_id: str | None = None,
                         errf.seek(0)
                         err = errf.read().decode("utf-8", errors="replace")
                         raise AppError(Codes.RENDER_FAILED, "ffmpeg 处理失败",
-                                       detail=err[-800:])
+                                           detail=err[-4096:])
                     if on_time:
                         # 流复制可能在首次轮询前完成，也要读取最后的进度。
                         errf.seek(0)
@@ -252,7 +325,7 @@ def _run(args: list[str], timeout: int = 7200, task_id: str | None = None,
                     proc.kill()
                     raise AppError(Codes.RENDER_FAILED, "ffmpeg 执行超时",
                                    detail=" ".join(args)[:500], retryable=True)
-                time.sleep(0.2)
+                time.sleep(0.05)
         finally:
             running = proc.poll() is None
             if running:
@@ -317,126 +390,101 @@ def extract_audio(config, video: Path, out_wav: Path,
     return out_wav
 
 
-def _filter_path(path: Path) -> str:
-    """穿过两层滤镜语法转义路径，保留 POSIX 文件名里的字面反斜杠。"""
-    return path.as_posix().replace("\\", r"\\").replace(":", r"\:").replace("'", _QUOTE_ESC)
-
-
-def _subtitle_filter(srt_path: Path, font_name: str = "", font_size: int = 18,
-                     position: str = "bottom", outline: int = 1,
-                     color: str = "#FFFFFF") -> str:
-    """subtitles 滤镜参数：Windows 路径需转义盘符冒号、反斜杠与单引号。
-
-    outline：黑色描边粗细（0 = 无描边；ASS 里越大越粗）。
-    """
-    p = _filter_path(srt_path)
-    align = POSITIONS.get(position, 2)
-    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
-        raise AppError(Codes.CFG_INVALID, "字幕颜色必须是 #RRGGBB 格式")
-    rgb = color[1:].upper()
-    ass_color = f"&H00{rgb[4:6]}{rgb[2:4]}{rgb[0:2]}"
-    try:
-        width = max(0, min(8, int(outline)))
-    except (TypeError, ValueError):
-        width = 1
-    style = (f"FontSize={int(font_size)},Outline={width},"
-             f"OutlineColour=&H00000000,PrimaryColour={ass_color},"
-             f"Alignment={align},MarginV=36")
-    if font_name:
-        # 字体名会拼进 force_style（, 和 : 是语法分隔符、' 是包裹符），
-        # 一律剔除，防止通过字体名注入滤镜参数
-        safe_font = re.sub(r"[',:;]", "", str(font_name))
-        style = f"FontName={safe_font}," + style
-    font_option = ""
-    if font_name == "Noto Sans CJK SC":
-        font_dir = bin_dir().parent / "fonts"
-        font_file = font_dir / "NotoSansCJKsc-Regular.otf"
-        if not font_file.is_file():
-            raise AppError(Codes.DEP_MISSING, "内置字幕字体 Noto Sans CJK SC 缺失",
-                           detail=str(font_file))
-        font_path = _filter_path(font_dir)
-        font_option = f":fontsdir='{font_path}'"
-    return f"subtitles='{p}'{font_option}:force_style='{style}'"
-
-
-def _write_positioned_ass(srt: Path, target: Path, position: str,
-                          vertical_offset: int, horizontal_offset: int = 0) -> Path:
-    """自定义偏移采用 ASS；中部对齐时 SRT 的 force_style 会忽略 MarginV。"""
-    from .subtitler import _merge_overlapping_cues, read_srt
-    from .transcriber import Segment
-
-    align, base_y = {"bottom": (2, 324), "middle": (5, 180),
-                     "top": (8, 36)}.get(position, (2, 324))
-    y = max(18, min(342, base_y + max(-120, min(120, int(vertical_offset)))))
-    x = 320 + max(-270, min(270, int(horizontal_offset)))
-
-    def ass_time(cs: int) -> str:
-        hours, rem = divmod(cs, 360000)
-        minutes, rem = divmod(rem, 6000)
-        secs, centis = divmod(rem, 100)
-        return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
-
-    header = ("[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n"
-              "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour,"
-              " SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline,"
-              " StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline,"
-              " Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-              "Style: Default,Arial,18,&H00FFFFFF,&H00FFFFFF,&H00000000,"
-              "&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,20,20,36,1\n"
-              "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL,"
-              " MarginR, MarginV, Effect, Text\n")
-    # ASS 文件只有百分之一秒精度。向外取整才能覆盖原字幕的毫秒时间窗，
-    # 起止分别四舍五入会让极短的原文/译文变成零时长而消失。
-    cues = []
-    for seg in read_srt(srt):
-        start_cs = max(0, round(seg.start * 1000)) // 10
-        end_cs = (round(seg.end * 1000) + 9) // 10
-        cues.append(Segment(start_cs / 100, end_cs / 100, seg.text))
-    events = []
-    # 精度转换后可能出现新的重叠；固定坐标会让多条文字画在同一位置，必须合并。
-    for seg in _merge_overlapping_cues(cues):
-        # 花括号是字幕原文，不能改成圆括号；反斜杠后插入空样式块，防止
-        # Windows 路径中的 \n 或字面量 \N / \h 被 libass 解释为排版命令。
-        escaped = {"{": r"\{", "}": r"\}", "\\": r"\{}", "\n": r"\N"}
-        safe_text = "".join(escaped.get(char, char) for char in seg.text)
-        events.append(f"Dialogue: 0,{ass_time(round(seg.start * 100))},{ass_time(round(seg.end * 100))},"
-                      f"Default,,0,0,0,,{{\\an{align}\\pos({x},{y})}}{safe_text}\n")
-    target.write_text(header + "".join(events), encoding="utf-8")
-    return target
-
-
-def _video_packet_duration(video: Path, task_id: str | None = None) -> float:
+def _video_packet_duration(video: Path, task_id: str | None = None, config=None) -> float:
     if task_id:
         cancel.raise_if_cancelled(task_id)
-    import av
-    start, end = float("inf"), float("-inf")
+    probe = find_ffprobe(config)
+    if not probe:
+        raise dep_missing("ffprobe", "安装与 FFmpeg 同版本的 ffprobe", "媒体完整性检查")
     try:
-        with av.open(str(video)) as container:
-            stream = container.streams.video[0]
-            for packet in container.demux(stream):
-                if task_id:
+        traits = _video_traits(video, config, task_id)
+        interval = 1 / traits.fps if traits.fps > 0 else 0
+        start, end = float("inf"), float("-inf")
+        with tempfile.TemporaryFile() as output:
+            _run([probe, "-v", "error", "-select_streams", "v:0", "-show_packets",
+                  "-show_entries", "packet=pts_time,dts_time,duration_time,size,flags",
+                  "-of", "compact=p=0:nk=0", "-i", str(video)], task_id=task_id, stdout=output)
+            output.seek(0)
+            for index, line in enumerate(output):
+                if task_id and index % 512 == 0:
                     cancel.raise_if_cancelled(task_id)
-                if not packet.size:
+                fields = dict(part.split(b"=", 1) for part in line.strip().split(b"|") if b"=" in part)
+                if b"C" in fields.get(b"flags", b""):
+                    raise ValueError("媒体包含损坏标记")
+                if int(fields.get(b"size", b"0")) <= 0:
                     continue
-                timestamp = packet.pts if packet.pts is not None else packet.dts
-                time_base = packet.time_base or stream.time_base
-                if timestamp is None or time_base is None:
+                timestamp = fields.get(b"pts_time")
+                if timestamp in (None, b"N/A"):
+                    timestamp = fields.get(b"dts_time")
+                if timestamp in (None, b"N/A"):
                     continue
-                # PTS 是画面播放时间；B 帧重排后的解码进度会把低帧率视频误判为截断。
-                seconds = float(timestamp * time_base)
-                duration = float((packet.duration or 0) * time_base)
-                if not duration and stream.average_rate:
-                    duration = 1 / float(stream.average_rate)
-                start = min(start, seconds)
-                end = max(end, seconds + duration)
-    except (OSError, ValueError, IndexError, av.error.FFmpegError) as error:
+                pts = float(timestamp)
+                duration = fields.get(b"duration_time")
+                packet_duration = float(duration) if duration not in (None, b"N/A") else 0
+                if not math.isfinite(pts) or not math.isfinite(packet_duration):
+                    raise ValueError("媒体包含非有限时间戳")
+                start = min(start, pts)
+                end = max(end, pts + (packet_duration if packet_duration > 0 else interval))
+    except (OSError, ValueError, AppError) as error:
         if task_id:
             cancel.raise_if_cancelled(task_id)
+        if isinstance(error, AppError) and error.code == Codes.TASK_CANCELLED:
+            raise
         raise AppError(Codes.ENG_FAILED, "下载文件不完整，视频数据无法读取",
                        retryable=True) from error
     if task_id:
         cancel.raise_if_cancelled(task_id)
     return max(0.0, end - start)
+
+
+def _packet_span(rows, task_id: str | None) -> float | None:
+    """从 framecrc 读取视频包的 PTS 与时长。异常时间轴交给原探测路径。"""
+    scale = None
+    ambiguous = False
+    start, end = float("inf"), float("-inf")
+    for index, raw in enumerate(rows):
+        if task_id and index % 512 == 0:
+            cancel.raise_if_cancelled(task_id)
+        if raw.startswith(b"#tb 0:"):
+            try:
+                num, den = raw.split()[-1].split(b"/")
+                scale = int(num) / int(den)
+            except (ValueError, ZeroDivisionError):
+                return None
+        if not raw.startswith(b"0,"):
+            continue
+        try:
+            _, _, pts, duration, size, *details = raw.split(b",")
+            pts, duration, size = int(pts), int(duration), int(size)
+            flags = next((int(field.strip()[2:], 16) for field in details
+                          if field.strip().startswith(b"F=")), 0)
+        except ValueError:
+            return None
+        if flags & 2:  # AV_PKT_FLAG_CORRUPT 由解复用器登记。
+            raise AppError(Codes.RENDER_FAILED, "ffmpeg 视频数据损坏", retryable=True)
+        if not size:
+            continue
+        if not scale or duration <= 0 or abs(pts) >= 1 << 62:
+            ambiguous = True
+            continue
+        start = min(start, pts * scale)
+        end = max(end, (pts + duration) * scale)
+    if task_id:
+        cancel.raise_if_cancelled(task_id)
+    return None if ambiguous else max(0.0, end - start)
+
+
+def _scan_video_packets(config, video: Path, task_id: str | None = None) -> float:
+    ffmpeg = find_ffmpeg(config)
+    with tempfile.TemporaryFile(mode="w+b") as packets:
+        # 以流复制扫描真实数据，一次保留每包 PTS、时长及损坏标记。
+        _run([ffmpeg, "-nostdin", "-v", "error", "-xerror", "-copyts",
+              "-i", str(video), "-map", "0:v:0", "-c:v", "copy",
+              "-avoid_negative_ts", "disabled", "-f", "framecrc", "-"],
+             task_id=task_id, stdout=packets, on_time=lambda _: None)
+        packets.seek(0)
+        duration = _packet_span(packets, task_id)
+    return duration if duration is not None else _video_packet_duration(video, task_id, config)
 
 
 def _check_video_duration(config, video: Path, expected: float,
@@ -445,9 +493,7 @@ def _check_video_duration(config, video: Path, expected: float,
         raise AppError(Codes.ENG_FAILED, "来源视频时长无效", suggestion="刷新链接后重新下载")
 
     # 只扫描视频包，音频尾部和容器声明的总时长不能证明画面完整。
-    _run([find_ffmpeg(config), "-i", str(video), "-map", "0:v:0", "-c", "copy", "-f", "null", "-"],
-         task_id=task_id, on_time=lambda _: None)
-    effective = _video_packet_duration(video, task_id)
+    effective = _scan_video_packets(config, video, task_id)
     tolerance = min(1.0, max(.25, expected * .02))
     if effective <= 0 or (expected > 0 and abs(expected - effective) > tolerance):
         raise AppError(Codes.ENG_FAILED, "音视频时长不一致，下载文件不完整",
@@ -458,14 +504,14 @@ def _check_video_duration(config, video: Path, expected: float,
 
 def mux_av(config, video: Path, audio: Path, out_path: Path,
            task_id: str | None = None, expected_duration: float = 0) -> Path:
-    """合并 aria2c 并行下载的分离音视频流（视频流复制，音频转 AAC 保证兼容）。
+    """合并分离音视频流；兼容音轨无损复制，只有容器不兼容时才转码。
 
     容器与音轨必须匹配：拆流下载的视频流常为 .webm（VP8/VP9/AV1），而 WebM
     只接受 Vorbis/Opus 音轨 —— 沿用原扩展名再写 AAC 会被 ffmpeg 直接拒绝
     （实测报错：Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and
     WebVTT subtitles are supported for WebM.），使 aria2c 拆流加速整条路径
-    失败降级。故统一改写到兼容性最好的 .mp4/AAC；仅当视频流无法复制进 mp4
-    时才退回与源容器匹配的 .webm/Opus。
+    失败降级。故先尝试 .mp4，并按实际音轨选择流复制或 AAC；视频流无法复制
+    进 mp4 时退回 .webm，按音轨选择复制或 Opus。
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ff = find_ffmpeg(config)
@@ -477,16 +523,19 @@ def mux_av(config, video: Path, audio: Path, out_path: Path,
     else:
         expected = max(probe_duration(config, video), probe_duration(config, audio))
     expected = max(expected, expected_duration)
+    source_audio = audio_codec(config, audio, task_id) if audio.is_file() else ""
 
     def _mux(target: Path, acodec: str) -> None:
         _run([ff, "-y", "-i", str(video), "-i", str(audio),
               "-map", "0:v:0", "-map", "1:a:0",
-              "-c:v", "copy", "-c:a", acodec, "-b:a", "192k",
+              "-c:v", "copy", "-c:a", acodec, *([] if acodec == "copy" else ["-b:a", "192k"]),
               str(target)], task_id=task_id)
 
     inputs = [video, audio]
-    for index, (target, codec) in enumerate(((out_path.with_suffix(".mp4"), "aac"),
-                                            (out_path.with_suffix(".webm"), "libopus"))):
+    mp4_audio = "copy" if source_audio in _MP4_SAFE_AUDIO else "aac"
+    webm_audio = "copy" if source_audio in {"opus", "vorbis"} else "libopus"
+    for index, (target, codec) in enumerate(((out_path.with_suffix(".mp4"), mp4_audio),
+                                            (out_path.with_suffix(".webm"), webm_audio))):
         with _temporary_media_output(target, inputs) as temporary:
             try:
                 _mux(temporary, codec)
@@ -547,6 +596,7 @@ def softmux(config, video: Path, subs: list[tuple[Path, str]], out_path: Path,
     """
     from .subtitler import render_srt
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    styled = any(path.suffix.casefold() == ".ass" for path, _ in subs)
 
     def _mux(target: Path, sub_codec: str, tracks: list[tuple[Path, str]]) -> None:
         args = [find_ffmpeg(config), "-y", "-i", str(video)]
@@ -559,25 +609,44 @@ def softmux(config, video: Path, subs: list[tuple[Path, str]], out_path: Path,
                  if task_id else audio_args(config, video, target))
         args += ["-c:v", "copy", *audio,
                  "-c:s", sub_codec]
-        for i, (_srt, lang) in enumerate(tracks):
+        for i, (subtitle, lang) in enumerate(tracks):
+            ass = subtitle.suffix.casefold() == ".ass"
+            if ass:
+                args += [f"-c:s:{i}", "copy"]
             args += [f"-metadata:s:s:{i}",
                      f"language={LANG_CODES.get(lang.split('+')[0], lang.split('+')[0])}",
                      f"-metadata:s:s:{i}",
-                     "title=" + " / ".join(LANG_NAMES.get(part, part) for part in lang.split("+")),
+                     "title=" + ("人名注释 · " if ass else "")
+                     + " / ".join(LANG_NAMES.get(part, part) for part in lang.split("+")),
                      f"-disposition:s:{i}", "default" if i == 0 else "0"]
+        if styled:
+            media = bin_dir()
+            font = (media.parent if media.name == "bin" else media) / "fonts" / "NotoSansCJKsc-Regular.otf"
+            if font.is_file():
+                args += ["-attach", str(font), "-metadata:s:t:0", "mimetype=application/vnd.ms-opentype"]
         args.append(str(target))
         _run(args, task_id=task_id)
 
     inputs = [video, *(path for path, _ in subs)]
     with ExitStack() as stack:
-        tracks = [(stack.enter_context(render_srt(path)), lang) for path, lang in subs]
-        for index, (target, codec) in enumerate(((out_path, "mov_text"),
-                                                (out_path.with_suffix(".mkv"), "srt"))):
+        tracks = []
+        for path, lang in subs:
+            if path.suffix.casefold() == ".ass":
+                try:
+                    parse_ass(path.read_text(encoding="utf-8-sig"))
+                except (OSError, ValueError) as error:
+                    raise AppError(Codes.CFG_INVALID, "人名注释 ASS 无法封装", detail=str(error)) from error
+            else:
+                path = stack.enter_context(render_srt(path))
+            tracks.append((path, lang))
+        formats = ([(out_path.with_suffix(".mkv"), "srt")] if styled else
+                   [(out_path, "mov_text"), (out_path.with_suffix(".mkv"), "srt")])
+        for index, (target, codec) in enumerate(formats):
             with _temporary_media_output(target, inputs) as temporary:
                 try:
                     _mux(temporary, codec, tracks)
                 except AppError as error:
-                    if index or error.code in (Codes.TASK_CANCELLED, Codes.CFG_INVALID):
+                    if styled or index or error.code in (Codes.TASK_CANCELLED, Codes.CFG_INVALID):
                         raise
                     log.warning("软封装 %s 失败，改用 .mkv/SRT 重试：%s", out_path.suffix, error)
                     continue
@@ -589,20 +658,30 @@ def burn(config, video: Path, srt: Path, out_path: Path,
           height: int | None = None, font_name: str = "", font_size: int = 0,
           position: str = "bottom", outline: int = 1, task_id: str | None = None,
           on_progress=None, color: str = "#FFFFFF",
-          vertical_offset: int = 0, horizontal_offset: int = 0) -> Path:
+          vertical_offset: int = 0, horizontal_offset: int = 0, on_encoding=None,
+          video_traits: _VideoTraits | None = None) -> Path:
     """硬字幕烧录：需重编码；height 顺带分辨率转码；字体/字号/位置覆盖样式。
 
     on_progress(fraction 0~1)：按 ffmpeg 已编码时长 / 视频总时长换算。
-    编码器自动择优（NVENC/QSV/AMF → libx264）：硬件编码只在「编码器已编译」
-    时尝试，驱动/会话层面失败（如独显被禁用、会话数占满）自动回退软编一次。
+    编码器自动择优（NVENC/QSV/AMF → libx264），验证实际可用性。
+    驱动或会话故障尝试下一种可用编码器；输入错误和取消不触发重复烧录。
     音频：输出固定为 .mp4，源音轨不兼容时自动转 AAC（否则流复制），
     避免出现「有画面没声音」的坏产物。
     """
     from .subtitler import read_srt
-    read_srt(srt)
+    if task_id:
+        cancel.raise_if_cancelled(task_id)
+    styled_ass = srt.suffix.casefold() == ".ass"
+    _check_output_target(out_path, [video, srt])
+    segments = None if styled_ass else read_srt(srt)
+    traits = video_traits or _video_traits(video, config, task_id)
+    if traits.depth > 10:
+        raise AppError(Codes.RENDER_FAILED, "此视频位深高于当前硬烧录支持范围",
+                       suggestion="可使用内嵌软字幕保留原始画质")
+    ten_bit = traits.depth > 8
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    duration = 0.0
-    if on_progress:
+    duration = traits.duration
+    if on_progress and duration <= 0:
         duration = (probe_duration(config, video, task_id=task_id)
                     if task_id else probe_duration(config, video))
     size = int(font_size) or int(config.get("render.font_size", 18))
@@ -612,45 +691,168 @@ def burn(config, video: Path, srt: Path, out_path: Path,
         inputs = [video, srt]
         temporary = resources.enter_context(_temporary_media_output(out_path, inputs))
         source = srt
-        if vertical_offset or horizontal_offset:
+        if not styled_ass and (vertical_offset or horizontal_offset):
             directory = resources.enter_context(tempfile.TemporaryDirectory(
                 prefix="jiying-burn-", dir=out_path.parent))
             source = _write_positioned_ass(srt, Path(directory) / "captions.ass",
-                                           position, vertical_offset, horizontal_offset)
-        vf = _subtitle_filter(source, font_name=name, font_size=size, position=position,
-                              outline=outline, color=color)
+                                           position, vertical_offset, horizontal_offset, segments=segments)
+        vf = (_ass_filter(source, name) if styled_ass else
+              _subtitle_filter(source, font_name=name, font_size=size, position=position,
+                               outline=outline, color=color))
+        layer_filter = vf
         if height:
             vf += f",scale=-2:{height}"
 
-        def _args(encoder: str) -> list[str]:
-            codec = (_HW_ENCODERS[encoder] if encoder in _HW_ENCODERS
-                     else _CPU_ENCODER_ARGS)
-            audio = (audio_args(config, video, out_path, task_id)
-                     if task_id else audio_args(config, video, out_path))
-            return [find_ffmpeg(config), "-y", "-i", str(video),
-                    "-vf", vf, *codec, *audio, str(temporary)]
+        audio = (_audio_output_args(traits.audio_codecs, video, out_path)
+                 if traits.audio_codecs is not None else audio_args(config, video, out_path, task_id))
+        ffmpeg = find_ffmpeg(config)
+        timing = ["-fps_mode:v", "passthrough"]
+        if traits.time_base:
+            timing += ["-enc_time_base:v", traits.time_base]
 
-        encoder = pick_encoder(config)
-        try:
-            _run(_args(encoder), task_id=task_id,
-                 on_time=(lambda sec: on_progress(min(sec / duration, 1.0)))
-                 if on_progress and duration > 0 else None)
-        except AppError as e:
-            # 硬件编码运行期失败（驱动/会话问题）→ 软编兜底；软编失败不回退
-            if e.code == Codes.TASK_CANCELLED or (task_id and cancel.is_cancelled(task_id)) or encoder not in _HW_ENCODERS:
-                raise
-            log.warning("硬件编码 %s 失败，回退 libx264：%s", encoder, e.message)
-            _run(_args("libx264"), task_id=task_id,
-                 on_time=(lambda sec: on_progress(min(sec / duration, 1.0)))
-                 if on_progress and duration > 0 else None)
+        layer = stream = None
+
+        def _args(encoder: str, cuda: bool) -> list[str]:
+            codec = (_HW_ENCODERS[encoder] if encoder in _HW_ENCODERS
+                     else _CPU_10BIT_ARGS if ten_bit else _CPU_ENCODER_ARGS)
+            if not ten_bit and encoder.startswith("hevc_") and encoder in _HW_ENCODERS:
+                codec = [arg for arg in codec if arg not in {"-pix_fmt", "p010le"}]
+                codec[codec.index("main10")] = "main"
+            if stream:
+                return [ffmpeg, "-y", "-xerror", *stream.input_args(), "-i", str(video),
+                        "-filter_complex_threads", "2", "-/filter_complex", str(stream.graph_file),
+                        "-map", "[v]", "-map", "0:a?", *timing, *codec, *traits.colors, *audio, str(temporary)]
+            if layer:
+                return [ffmpeg, "-y", "-xerror", "-init_hw_device", "cuda=compose:0", "-filter_hw_device", "compose",
+                        "-hwaccel", "cuda", "-hwaccel_device", "compose", "-hwaccel_output_format", "cuda",
+                        "-i", str(video), "-i", str(layer.mask), "-filter_complex", layer.graph,
+                        "-map", "[v]", "-map", "0:a?", *timing, *codec, *traits.colors, *audio, str(temporary)]
+            decode = ["-xerror", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda else []
+            filtergraph = f"hwdownload,format={traits.cuda_format},{vf}" if cuda else vf
+            return [ffmpeg, "-y", *decode, "-i", str(video),
+                    "-vf", filtergraph, *timing, *codec, *traits.colors, *audio, str(temporary)]
+
+        encoder, attempted = _pick_10bit_encoder(config) if ten_bit else pick_encoder(config), set()
+        cuda = bool(traits.cuda_format and encoder in {"h264_nvenc", "hevc_nvenc"})
+        mode = config.get("render.gpu_overlay", "auto")
+
+        def legacy_layer():
+            if encoder != "h264_nvenc" or not cuda_overlay.preferred(traits, mode):
+                return None
+            try:
+                if on_encoding:
+                    on_encoding("准备字幕透明图层")
+                overlay_dir = resources.enter_context(tempfile.TemporaryDirectory(prefix="jiying-layer-", dir=out_path.parent))
+                with (resource_slot("cpu", task_id) if task_id else nullcontext()):
+                    return cuda_overlay.prepare(ffmpeg, source, segments, layer_filter,
+                                                traits, height, Path(overlay_dir), _run, task_id)
+            except (AppError, OSError, ValueError) as error:
+                if isinstance(error, AppError) and error.code == Codes.TASK_CANCELLED:
+                    raise
+                log.info("透明图层不可用，保留传统字幕滤镜：%s", type(error).__name__)
+                return None
+
+        auto_dual_zone = str(mode).casefold() == "auto" and cuda_overlay.auto_dual_zone_preferred(
+            source, encoder, traits, height)
+        if cuda_overlay.stream_preferred(encoder, traits, mode, auto_dual_zone=auto_dual_zone) and (
+                not encoder.startswith("av1_") or encoder_usable(config, encoder)):
+            try:
+                graph_dir = resources.enter_context(tempfile.TemporaryDirectory(
+                    prefix="jiying-stream-", dir=out_path.parent))
+                stream = cuda_overlay.stream_plan(source, segments, layer_filter, traits, height,
+                                                  Path(graph_dir), position, name)
+                if auto_dual_zone and stream and not stream.dual_local:
+                    stream = None
+            except (OSError, ValueError) as error:
+                log.info("流式显存合成图不可用：%s", type(error).__name__)
+        if stream is None:
+            layer = legacy_layer()
+        last_progress = 0.0
+
+        def report(seconds: float) -> None:
+            nonlocal last_progress
+            last_progress = max(last_progress, min(seconds / duration, 1.0))
+            on_progress(last_progress)
+
+        while True:
+            attempted.add(encoder)
+            hardware = encoder in _HW_ENCODERS
+            mode = ({"nvenc": "NVIDIA NVENC", "qsv": "Intel QSV", "amf": "AMD AMF"}[encoder.split("_")[-1]]
+                    if hardware else "CPU 软件编码")
+            decode_mode = ("单进程 CUDA 解码与显存合成" if stream else
+                           "CUDA 解码与显存合成" if layer else "CUDA 解码" if cuda else "软件解码")
+            detail = f"{mode} · {decode_mode}" if hardware else mode
+            if on_encoding:
+                on_encoding("等待 " + detail)
+            try:
+                slot = resource_slot("gpu" if hardware else "cpu", task_id) if task_id else nullcontext()
+                with slot:
+                    if on_encoding:
+                        on_encoding(detail)
+                    _run(_args(encoder, cuda), task_id=task_id,
+                         on_time=report if on_progress and duration > 0 else None)
+                    if output_layer := stream or layer:
+                        result = _video_traits(temporary, config, task_id)
+                        if (result.width, result.height, result.depth) != (
+                                output_layer.width, output_layer.height, traits.depth):
+                            raise AppError(Codes.RENDER_FAILED, "显卡输出尺寸或位深与目标不符")
+                        if stream and (result.rotation or (
+                                traits.audio_codecs is not None and result.audio_codecs is not None
+                                and len(result.audio_codecs) != len(traits.audio_codecs)) or not stream.bounds_valid()):
+                            raise AppError(Codes.RENDER_FAILED, "流式烧录的方向、音轨或字幕边界与目标不符")
+                break
+            except AppError as error:
+                if error.code == Codes.TASK_CANCELLED or (task_id and cancel.is_cancelled(task_id)):
+                    raise
+                if stream:
+                    detail = (error.detail or error.message).strip().splitlines()
+                    log.info("流式显存合成失败，回退兼容路径：%s", " | ".join(detail[:4])[:700])
+                    stream = None
+                    layer = legacy_layer()
+                    continue
+                if layer:
+                    layer = None
+                    log.info("显存合成失败，改用传统字幕混合")
+                    continue
+                if cuda and _hardware_decode_failure(error):
+                    cuda = False
+                    log.info("硬件解码不可用，改用软件解码并继续显卡编码")
+                    continue
+                if encoder not in _HW_ENCODERS or not _hardware_failure(error):
+                    raise
+                _usable_encoder_cache[_encoder_key(config, encoder)] = (time.monotonic(), False)
+                previous = encoder
+                encoder = next((name for name in _HW_ENCODERS if name not in attempted
+                    and name.startswith("hevc_" if ten_bit else "h264_")
+                    and str(config.get("render.encoder", "auto") or "auto").lower() == "auto"
+                    and encoder_usable(config, name)), "libx265" if ten_bit else "libx264")
+                cuda = False
+                log.warning("硬件编码 %s 不可用，改用 %s：%s", previous, encoder, error.message)
         _publish_media_output(temporary, out_path, inputs, task_id)
     return out_path
+
+
+def _hardware_failure(error: AppError) -> bool:
+    detail = (error.message + " " + error.detail).lower()
+    return any(word in detail for word in (
+        "openencodesession", "no nvenc capable", "cannot load nvcuda", "cannot load libcuda",
+        "driver does not support", "unsupported device", "error while opening encoder",
+        "error initializing output stream", "device creation failed", "mfx session", "amf failed"))
+
+
+def _hardware_decode_failure(error: AppError) -> bool:
+    detail = (error.message + " " + error.detail).lower()
+    return any(word in detail for word in (
+        "no device available for decoder", "hardware device setup failed", "failed setup for format cuda",
+        "device creation failed", "cannot load nvcuda", "cannot load libcuda",
+        "hwdownload", "cuvid", "nvdec", "error transferring the data",
+        "hardware does not support", "failed to get hw surface"))
 
 
 def render_preview_png(config, text: str, font_name: str, font_size: int,
                         position: str, out_png: Path, outline: int = 1,
                         color: str = "#FFFFFF", vertical_offset: int = 0,
-                        horizontal_offset: int = 0) -> Path:
+                        horizontal_offset: int = 0, *, person_notes: bool = False) -> Path:
     """渲染字幕样式预览帧：深色 16:9 背景 + 样例文本按所选样式烧录。
 
     不依赖任何视频文件，样式参数实时可见（所见即所得的烧录效果）。
@@ -665,14 +867,24 @@ def render_preview_png(config, text: str, font_name: str, font_size: int,
             encoding="utf-8")
         size = int(font_size) or int(config.get("render.font_size", 18))
         name = font_name or str(config.get("render.font_name", "") or "Noto Sans CJK SC")
-        source = (_write_positioned_ass(srt, temporary / "captions.ass", position,
-                                        vertical_offset, horizontal_offset)
-                  if vertical_offset or horizontal_offset else srt)
-        vf = _subtitle_filter(source, font_name=name, font_size=size, position=position,
-                              outline=outline, color=color)
+        if person_notes:
+            from .ass_composer import compose_person_notes
+            from .subtitler import read_srt
+            sample = {"source": "Lucy Morgan", "target": "露西·摩根", "sense": "节目嘉宾",
+                      "kind": "person", "origin": "screen", "start": 0., "end": 4.}
+            source = compose_person_notes(read_srt(srt), [sample], temporary / "preview.ass",
+                font_name=name, font_size=size, position=position, color=color, outline=outline,
+                vertical_offset=vertical_offset, horizontal_offset=horizontal_offset)
+            vf = _ass_filter(source, name)
+        else:
+            source = (_write_positioned_ass(srt, temporary / "captions.ass", position,
+                                            vertical_offset, horizontal_offset)
+                      if vertical_offset or horizontal_offset else srt)
+            vf = _subtitle_filter(source, font_name=name, font_size=size, position=position,
+                                  outline=outline, color=color)
         image = temporary / "preview.png"
         _run([find_ffmpeg(config), "-y", "-loglevel", "error",
               "-f", "lavfi", "-i", "color=c=0x232a3a:s=640x360:d=10",
-              "-vf", vf, "-frames:v", "1", str(image)])
+              "-vf", vf, *(["-ss", "0.8"] if person_notes else []), "-frames:v", "1", str(image)])
         image.replace(out_png)
     return out_png

@@ -8,6 +8,14 @@ namespace Jiying.Desktop;
 
 public partial class MainWindow
 {
+    private readonly Dictionary<FrameworkElement, ExpansionTransition> _expansionTransitions = new();
+
+    private ExpansionTransition ExpansionFor(FrameworkElement body)
+    {
+        if (!_expansionTransitions.TryGetValue(body, out var transition))
+            _expansionTransitions.Add(body, transition = new ExpansionTransition(body));
+        return transition;
+    }
     private void UpdateParseLayout(bool compact)
     {
         var changed = ParseContent.VerticalAlignment != (compact ? VerticalAlignment.Top : VerticalAlignment.Center);
@@ -33,35 +41,15 @@ public partial class MainWindow
         group.ApplyTemplate();
         if (group.Template.FindName("ExpandSite", group) is not FrameworkElement body) return;
         var show = group.IsExpanded;
-        var from = body.Visibility == Visibility.Visible ? body.ActualHeight : 0;
-        body.BeginAnimation(MaxHeightProperty, null);
-        body.BeginAnimation(OpacityProperty, null);
-        body.MaxHeight = double.PositiveInfinity;
-        body.Opacity = 1;
-        if (e.RoutedEvent == LoadedEvent || !IsLoaded || !SystemParameters.ClientAreaAnimation)
-        {
-            body.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            return;
-        }
-        body.Visibility = Visibility.Visible;
-        body.IsHitTestVisible = show;
         if (!show && body.IsKeyboardFocusWithin && group.Template.FindName("HeaderSite", group) is ToggleButton header) header.Focus();
-        body.Measure(new Size(Math.Max(1, group.ActualWidth), double.PositiveInfinity));
-        var to = show ? body.DesiredSize.Height : 0;
-        var duration = TimeSpan.FromMilliseconds(show ? 240 : 180);
-        var motion = new DoubleAnimation(from, to, duration) { EasingFunction = EaseOut, FillBehavior = FillBehavior.Stop };
-        body.Tag = motion;
-        motion.Completed += (_, _) =>
-        {
-            if (!ReferenceEquals(body.Tag, motion)) return;
-            body.MaxHeight = double.PositiveInfinity;
-            body.Opacity = 1;
-            body.Visibility = group.IsExpanded ? Visibility.Visible : Visibility.Collapsed;
-        };
-        body.MaxHeight = from;
-        body.Opacity = show && from == 0 ? 0 : 1;
-        body.BeginAnimation(MaxHeightProperty, motion);
-        body.BeginAnimation(OpacityProperty, new DoubleAnimation(body.Opacity, show ? 1 : 0, duration) { FillBehavior = FillBehavior.Stop });
+        var animate = e.RoutedEvent != LoadedEvent && IsLoaded && SystemParameters.ClientAreaAnimation;
+        var width = VisualTreeHelper.GetParent(body) is FrameworkElement { ActualWidth: > 0 } parent
+            ? parent.ActualWidth : group.ActualWidth;
+        if (group == SpeechSettings || group == AdvancedSettings)
+            ExpansionFor(body).Set(show, animate, width, show ? GroupOpenEase : CssEase, show ? 320 : 210,
+                show ? GroupFadeInEase : EaseOut);
+        else
+            ExpansionFor(body).Set(show, animate, width, EaseOut, show ? 240 : 180);
     }
 
     private void SettingsArrow_Changed(object sender, RoutedEventArgs e)
@@ -76,5 +64,53 @@ public partial class MainWindow
         if (!IsLoaded || !SystemParameters.ClientAreaAnimation) return;
         rotate.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(from, rotate.Angle, TimeSpan.FromMilliseconds(180))
             { EasingFunction = EaseOut, FillBehavior = FillBehavior.Stop });
+    }
+
+    private static readonly IEasingFunction EaseOut = new CubicBezierEase(.23, 1, .32, 1);
+    private static readonly IEasingFunction EaseInOut = new CubicBezierEase(.77, 0, .175, 1);
+    private static readonly IEasingFunction CssEase = new CubicBezierEase(.25, .1, .25, 1);
+    private static readonly IEasingFunction GroupOpenEase = new CubicBezierEase(.28, .08, .24, 1);
+    private static readonly IEasingFunction GroupFadeInEase = new CubicBezierEase(.40, 0, .25, 1);
+    private static readonly IEasingFunction NavEase = new CubicBezierEase(.25, .65, .45, 1);
+
+    internal static void AnimateCard(FrameworkElement card)
+    {
+        ResetView(card);
+        if (!SystemParameters.ClientAreaAnimation) return;
+        var move = new TranslateTransform();
+        card.RenderTransform = move;
+        var duration = TimeSpan.FromMilliseconds(220);
+        card.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(.52, 1, duration) { EasingFunction = EaseOut, FillBehavior = FillBehavior.Stop });
+        move.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(9, 0, duration) { EasingFunction = EaseOut, FillBehavior = FillBehavior.Stop });
+    }
+}
+
+internal sealed class CubicBezierEase(double x1, double y1, double x2, double y2) : IEasingFunction
+{
+    public double Ease(double normalizedTime)
+    {
+        var u = normalizedTime;
+        for (var i = 0; i < 6; i++)
+        {
+            var error = Bezier(u, x1, x2) - normalizedTime;
+            var derivative = BezierDerivative(u, x1, x2);
+            if (Math.Abs(error) < .0001 || Math.Abs(derivative) < .0001) break;
+            u = Math.Clamp(u - error / derivative, 0, 1);
+        }
+        return Bezier(u, y1, y2);
+    }
+
+    private static double Bezier(double t, double p1, double p2)
+    {
+        var inverse = 1 - t;
+        return 3 * inverse * inverse * t * p1 + 3 * inverse * t * t * p2 + t * t * t;
+    }
+
+    private static double BezierDerivative(double t, double p1, double p2)
+    {
+        var inverse = 1 - t;
+        return 3 * inverse * inverse * p1 + 6 * inverse * t * (p2 - p1) + 3 * t * t * (1 - p2);
     }
 }

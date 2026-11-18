@@ -1,5 +1,4 @@
 using System.IO;
-using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -40,8 +39,7 @@ internal static class XiaohongshuWebsiteRegression
             var qrReady = await Wait(async () => await core.ExecuteScriptAsync(ready) == "true");
             check(qrReady, "官网真实二维码加载成功");
             if (!qrReady) throw new InvalidOperationException("Xiaohongshu official QR did not load");
-            var stateScript = (string)typeof(PlatformConnectionWindow).GetField("XiaohongshuLoginStateScript",
-                BindingFlags.Static | BindingFlags.NonPublic)!.GetRawConstantValue()!;
+            var stateScript = PlatformConnectionWindow.XiaohongshuLoginStateScript;
             using var state = JsonDocument.Parse(await core.ExecuteScriptAsync(stateScript));
             check(!state.RootElement.GetProperty("authenticated").GetBoolean() && saved == 0,
                 "官网访客状态不自动保存或关闭窗口");

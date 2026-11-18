@@ -3,12 +3,19 @@ import runpy
 import json
 import hashlib
 import lzma
+import os
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 
 def run_spec(tmp_path, monkeypatch, binaries=()):
+    spec = Path(__file__).parents[1] / 'JiyingEngine.spec'
+    version_file = tmp_path / 'app' / 'VERSION'
+    version_file.parent.mkdir()
+    shutil.copyfile(spec.parent / 'app' / 'VERSION', version_file)
+    monkeypatch.delenv('JIYING_MEDIA_BIN', raising=False)
     cuda = tmp_path / 'bin' / 'cuda'
     cuda.mkdir(parents=True)
     for name in ('cublas64_12.dll', 'cublasLt64_12.dll', 'NVIDIA-cublas-LICENSE.txt',
@@ -21,19 +28,46 @@ def run_spec(tmp_path, monkeypatch, binaries=()):
         captured.update(kwargs)
         return SimpleNamespace(pure=[], scripts=[], binaries=list(binaries), datas=kwargs['datas'])
 
-    spec = Path(__file__).parents[1] / 'JiyingEngine.spec'
+    def exe(*args, **kwargs):
+        captured['exe_version'] = kwargs['version']
+
     result = runpy.run_path(str(spec), init_globals={
         'SPECPATH': str(tmp_path), 'Analysis': analysis,
-        'PYZ': lambda *a, **kw: None, 'EXE': lambda *a, **kw: None,
+        'PYZ': lambda *a, **kw: None, 'EXE': exe,
         'COLLECT': lambda *a, **kw: a,
     })
     return captured, result
+
+
+def test_release_version_is_collected_and_matches_windows_resource(tmp_path, monkeypatch):
+    captured, _ = run_spec(tmp_path, monkeypatch)
+    version_file = tmp_path / 'app' / 'VERSION'
+    assert (str(version_file), 'app') in captured['datas']
+    if os.name != 'nt':
+        assert captured['exe_version'] is None
+        return
+
+    version = version_file.read_text(encoding='utf-8').strip()
+    major, minor, build, revision = map(int, version.split('.'))
+    resource = captured['exe_version']
+    fixed = resource.ffi
+    assert fixed.fileVersionMS == fixed.productVersionMS == (major << 16) | minor
+    assert fixed.fileVersionLS == fixed.productVersionLS == (build << 16) | revision
+    strings = {item.name: item.val for item in resource.kids[0].kids[0].kids}
+    assert strings['FileVersion'] == strings['ProductVersion'] == version
 
 
 def test_base_package_contains_no_cuda_payload(tmp_path, monkeypatch):
     captured, _ = run_spec(tmp_path, monkeypatch)
     assert not any(Path(source).suffix in ('.xz', '.dll') and destination == str(Path('bin') / 'cuda')
                    for source, destination in captured['datas'])
+
+
+def test_youtube_solver_scripts_are_bundled(tmp_path, monkeypatch):
+    captured, _ = run_spec(tmp_path, monkeypatch)
+    names = {Path(source).name for source, _ in captured['datas']}
+    assert {'core.min.js', 'lib.min.js'} <= names
+    assert 'yt_dlp_ejs.yt.solver' in captured['hiddenimports']
 
 
 def test_only_required_cuda_runtime_is_collected(tmp_path, monkeypatch):

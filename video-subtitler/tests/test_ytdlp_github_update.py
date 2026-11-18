@@ -2,11 +2,22 @@
 import hashlib
 import io
 import zipfile
+import sys
 from pathlib import Path
 
 import pytest
 
 from app.services import ytdlp_updater as updater
+
+
+@pytest.fixture(autouse=True)
+def isolated_update_imports(monkeypatch):
+    """假的更新包不得污染后续用真实解析器执行的回归。"""
+    modules = {name: module for name, module in sys.modules.copy().items() if updater._runtime_module(name)}
+    monkeypatch.setattr(sys, 'path', list(sys.path))
+    yield
+    updater._evict_ytdlp()
+    sys.modules.update(modules)
 
 
 def package(version='2099.01.01', extra=None):

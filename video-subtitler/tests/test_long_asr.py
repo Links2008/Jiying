@@ -10,7 +10,8 @@ import pytest
 from app.core.config import Config
 from app.core.errors import AppError, Codes
 from app.services.long_asr import _merge_overlap, transcribe_long_audio
-from app.services.transcriber import FasterWhisperTranscriber, Segment, Transcript, _timed_word_segments
+from app.services.transcriber import FasterWhisperTranscriber, Segment, Transcript
+from app.services.speech_text import _timed_word_segments
 
 
 def audio_file(path, seconds=23, silent=False):

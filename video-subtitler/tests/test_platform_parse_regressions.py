@@ -24,16 +24,16 @@ def engine_with_info(monkeypatch, formats):
     'https://www.xiaohongshu.com/explore/6411cf99000000001300b6d9',
     'https://m.xiaohongshu.com/discovery/item/6411cf99000000001300b6d9',
     'https://xhslink.com/o/public-sample'])
-def test_xhs_original_is_available_and_selected_first(monkeypatch, url):
+def test_xhs_original_is_available_after_confirmed_quality(monkeypatch, url):
     engine = engine_with_info(monkeypatch, [
         {"format_id": "720", "width": 1280, "height": 720, "vcodec": "h264", "acodec": "aac"},
         {"format_id": "1080", "width": 1920, "height": 1080, "vcodec": "h264", "acodec": "aac"},
         {"format_id": "direct", "url": "https://sns-video-bd.xhscdn.com/sample",
          "ext": "mp4", "quality": 1, "filesize": 9000000}])
     result = engine.probe(url)
-    assert [f.format_id for f in result.formats] == ["direct", "1080", "720"]
-    assert "原始" in result.formats[0].label
-    assert result.formats[0].height == 0
+    assert [f.format_id for f in result.formats] == ["1080", "720", "direct"]
+    assert "原始" in result.formats[-1].label and "待确认" in result.formats[-1].label
+    assert result.formats[-1].height == 0
 
 
 def test_portrait_quality_uses_short_edge(monkeypatch):

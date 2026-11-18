@@ -1,7 +1,6 @@
 // 使用隔离回环服务，检查事件流取消与旧引擎任务状态的保守判断。
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Jiying.Desktop;
@@ -15,7 +14,7 @@ internal static class NetworkRegression
         using (var client = new EngineClient("unused-test-engine"))
         using (var stop = new CancellationTokenSource())
         {
-            typeof(EngineClient).GetProperty("Port")!.SetValue(client, server.Port);
+            client.Port = server.Port;
             var listening = client.ListenEventsAsync(() => Task.CompletedTask, stop.Token);
             await server.Paused.Task.WaitAsync(TimeSpan.FromSeconds(5));
             // 错误响应头已发出，留出事件客户端进入响应体读取的时间。
@@ -36,7 +35,6 @@ internal static class NetworkRegression
             }
         }
 
-        var method = typeof(EngineClient).GetMethod("HasActiveTasksAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
         foreach (var (body, expected) in new[]
         {
             ("[]", false),
@@ -52,7 +50,7 @@ internal static class NetworkRegression
         })
         {
             using var server = new StatusServer(body);
-            var active = await (Task<bool>)method.Invoke(null, [server.Port, CancellationToken.None])!;
+            var active = await EngineClient.HasActiveTasksAsync(server.Port, CancellationToken.None);
             if (active != expected) failures.Add("无法确认旧引擎状态时不得认为可退出：" + body);
         }
         await CheckDiscoveryReplies(failures);
@@ -65,7 +63,7 @@ internal static class NetworkRegression
     }
 
     private static void SetPort(EngineClient client, int port) =>
-        typeof(EngineClient).GetProperty("Port")!.SetValue(client, port);
+        client.Port = port;
 
     private static void CheckConditionalDisconnect(List<string> failures)
     {
@@ -83,18 +81,25 @@ internal static class NetworkRegression
 
     private static async Task CheckDiscoveryReplies(List<string> failures)
     {
-        var check = typeof(EngineClient).GetMethod("CheckPortAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
         foreach (var body in new[] { "[]", "null", "42", "true", "\"其他本地服务\"" })
         {
             using var server = new StatusServer(body);
             using var client = new EngineClient("isolated-discovery-engine");
             try
             {
-                var result = await (Task<int?>)check.Invoke(client, [server.Port, CancellationToken.None, null])!;
+                var result = await client.CheckPortAsync(server.Port, CancellationToken.None, null);
                 if (result is not null) failures.Add("发现回复必须是引擎对象，不能接受：" + body);
             }
             catch (InvalidOperationException) { failures.Add("其他端口的合法非对象 JSON 阻断引擎发现：" + body); }
         }
+        var root = Path.GetTempPath();
+        using var paired = new StatusServer(JsonSerializer.Serialize(new { engine_root = root, requires_token = true }));
+        using var legacy = new StatusServer(JsonSerializer.Serialize(new { engine_root = root }));
+        using var clientForPath = new EngineClient(Path.Combine(root, "JiyingEngine.exe"));
+        var pairedPort = await clientForPath.CheckPortAsync(paired.Port, CancellationToken.None, null);
+        var legacyPort = await clientForPath.CheckPortAsync(legacy.Port, CancellationToken.None, null);
+        if (pairedPort is not null || legacyPort != legacy.Port)
+            failures.Add("旧版地址探测应保留兼容，需令牌的引擎必须经配对入口发现");
     }
 
     private static async Task CheckInvalidatedProbe(List<string> failures)

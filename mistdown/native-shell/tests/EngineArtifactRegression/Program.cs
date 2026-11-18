@@ -1,7 +1,6 @@
 // 使用实际客户端源码与隔离回环 HTTP，检查大视频保存、取消和旧文件保护。
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -32,7 +31,7 @@ try
 
     using (var client = Connect(server.Port))
     {
-        var http = (HttpClient)typeof(EngineClient).GetField("_api", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(client)!;
+        var http = (HttpClient)client.RequestTransport;
         http.MaxResponseContentBufferSize = 1024 * 1024;
         var output = Path.Combine(directory, "bounded.mp4");
         await Save(client, 1, output, CancellationToken.None);
@@ -60,8 +59,9 @@ try
         var output = Path.Combine(directory, $"failure-{id}.mp4");
         await File.WriteAllBytesAsync(output, oldContent);
         using var client = Connect(server.Port);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var failed = false;
-        try { await Save(client, id, output, CancellationToken.None); }
+        try { await Save(client, id, output, timeout.Token); }
         catch (Exception error) when (error is IOException or HttpRequestException or InvalidOperationException) { failed = true; }
         Require(failed, "传输截断或 HTTP 错误必须报告失败");
         Require((await File.ReadAllBytesAsync(output)).SequenceEqual(oldContent), "失败覆盖了旧视频");
@@ -92,7 +92,7 @@ finally { Directory.Delete(directory, true); }
 static EngineClient Connect(int port)
 {
     var client = new EngineClient("unused-test-engine");
-    typeof(EngineClient).GetProperty("Port")!.SetValue(client, port);
+    client.Port = port;
     return client;
 }
 
@@ -155,6 +155,7 @@ sealed class ArtifactServer : IDisposable
                 return;
             }
             response.ContentType = "application/octet-stream";
+            response.KeepAlive = id != 3;
             response.SendChunked = id == 5;
             if (!response.SendChunked) response.ContentLength64 = id == 2 ? 3L * 1024 * 1024 * 1024 : _size;
             var length = id == 5 ? SmallSize : _size;
@@ -170,7 +171,11 @@ sealed class ArtifactServer : IDisposable
                     await Release.Task;
                     return;
                 }
-                if (id == 3) return;
+                if (id == 3)
+                {
+                    response.Abort();
+                    return;
+                }
             }
         }
         catch (Exception error) when (error is IOException or HttpListenerException or ObjectDisposedException) { }

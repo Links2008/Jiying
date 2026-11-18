@@ -1,7 +1,6 @@
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,10 +10,8 @@ internal static class ProbeCancellationRegression
 {
     internal static async Task Run(MainWindow window, Action<bool, string> check)
     {
-        T Field<T>(string name) => (T)typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)!.GetValue(window)!;
-        var engine = Field<object>("_engine");
-        var port = engine.GetType().GetProperty("Port")!;
-        var previousPort = port.GetValue(engine);
+        var engine = window.Engine;
+        var previousPort = engine.Port;
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -41,18 +38,18 @@ internal static class ProbeCancellationRegression
         });
         try
         {
-            port.SetValue(engine, ((IPEndPoint)listener.LocalEndpoint).Port);
-            Field<TextBox>("UrlBox").Text = "https://example.com/late-result";
-            var parsing = (Task)typeof(MainWindow).GetMethod("ProbeAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [false])!;
+            engine.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            window.UrlBox.Text = "https://example.com/late-result";
+            var parsing = window.ProbeAsync(false);
             await received.Task.WaitAsync(timeout.Token);
-            Field<TextBox>("UrlBox").Clear();
+            window.UrlBox.Clear();
             release.TrySetResult();
             await Task.WhenAll(parsing, server).WaitAsync(timeout.Token);
             await Task.Delay(400);
-            check(Field<object?>("_probe") is null && Field<FrameworkElement>("ProbePanel").Visibility == Visibility.Collapsed &&
-                  Field<StackPanel>("ParseContent").VerticalAlignment == VerticalAlignment.Center,
+            check(window.ProbeResult is null && window.ProbePanel.Visibility == Visibility.Collapsed &&
+                  window.ParseContent.VerticalAlignment == VerticalAlignment.Center,
                   "Late HTTP probe results cannot restore a URL that the user cleared");
         }
-        finally { listener.Stop(); port.SetValue(engine, previousPort); release.TrySetResult(); }
+        finally { listener.Stop(); engine.Port = previousPort; release.TrySetResult(); }
     }
 }

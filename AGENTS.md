@@ -1,7 +1,7 @@
 # 即影开发指引
 
 - 始终使用简体中文回复，代码注释、提交说明和新增文档使用中文；变量与函数名保留英文。
-- 当前桌面客户端是 `mistdown/native-shell/Jiying.Desktop`，版本为 1.1.34.0；后端引擎是 `video-subtitler`。优先阅读 `开发说明.md`。
+- 桌面客户端位于 `mistdown/native-shell/Jiying.Desktop`，非界面代码位于 `Jiying.Core`，后端引擎位于 `video-subtitler`。应用版本以 `video-subtitler/app/VERSION` 为准。优先阅读 `开发说明.md`。
 - `mistdown` 根目录的 Python/HTML 桌面壳是保留的历史实现，最新桌面功能应修改 WPF 工程。
 - 桌面工程使用 .NET 10 和 WPF，构建与界面回归需要 Windows。Linux 环境可编辑源码并运行 Python 后端回归。
 - 保持客户端和后端的接口一致。修改后执行受影响的既有测试，必要时执行完整后端回归。

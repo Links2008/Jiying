@@ -15,6 +15,7 @@ from app.core.config import Config, DEFAULTS
 from app.core.errors import AppError, Codes
 from app.models import db
 from app.models.db import Store
+from app.pipeline import artifacts, rendering, speech
 from app.pipeline import runner as pipeline
 from app.services.transcriber import Segment, Transcript
 
@@ -55,7 +56,7 @@ def test_rerender_failure_has_its_own_terminal_state(ready, monkeypatch, code, t
             cancel.cancel(ready.task["id"])
         raise AppError(code, "模拟重渲染中断")
 
-    monkeypatch.setattr(pipeline, "burn", fail)
+    monkeypatch.setattr(rendering, "burn", fail)
     with pytest.raises(AppError) as error:
         ready.runner.rerender_subtitles(ready.task["id"], "zh")
     assert error.value.code == code
@@ -74,7 +75,7 @@ def test_rerender_wraps_unexpected_render_failure(ready, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("模拟编码器异常")
 
-    monkeypatch.setattr(pipeline, "burn", fail)
+    monkeypatch.setattr(rendering, "burn", fail)
     with pytest.raises(AppError) as error:
         ready.runner.rerender_subtitles(ready.task["id"], "zh")
     assert error.value.code == Codes.RENDER_FAILED
@@ -158,7 +159,7 @@ def test_stopped_stage_records_finish_and_new_attempt_start(tmp_path, monkeypatc
 def test_cross_device_publication_keeps_previous_output_on_interruption(ready, monkeypatch, stop):
     source = ready.video.parent / ready.output.name
     source.write_bytes(b"new complete encoded output")
-    original_replace = pipeline.shutil.os.replace
+    original_replace = artifacts.os.replace
 
     def cross_device(src, dst, *args, **kwargs):
         if Path(src) == source:
@@ -170,9 +171,9 @@ def test_cross_device_publication_keeps_previous_output_on_interruption(ready, m
             raise OSError(errno.ENOSPC, "模拟目标磁盘已满")
         cancel.cancel(ready.task["id"])
 
-    monkeypatch.setattr(pipeline.shutil.os, "rename", cross_device)
-    monkeypatch.setattr(pipeline.shutil.os, "replace", cross_device)
-    monkeypatch.setattr(pipeline.os, "fsync", interrupted_flush)
+    monkeypatch.setattr(artifacts.os, "rename", cross_device)
+    monkeypatch.setattr(artifacts.os, "replace", cross_device)
+    monkeypatch.setattr(artifacts.os, "fsync", interrupted_flush)
     with pytest.raises(OSError if stop == "disk_full" else AppError):
         ready.runner._publish_file(ready.task["id"], source, ready.output.parent, "output")
     assert ready.output.read_bytes() == b"previous successful video"
@@ -183,7 +184,7 @@ def test_cross_device_publication_keeps_previous_output_on_interruption(ready, m
 def test_cross_device_copy_cancels_before_reading_rest_of_large_video(ready, monkeypatch):
     source = ready.video.parent / ready.output.name
     source.write_bytes(b"x" * (3 * 1024 * 1024))
-    original_replace, original_open = pipeline.os.replace, Path.open
+    original_replace, original_open = artifacts.os.replace, Path.open
     reads = []
 
     def cross_device(src, dst):
@@ -215,7 +216,7 @@ def test_cross_device_copy_cancels_before_reading_rest_of_large_video(ready, mon
         stream = original_open(path, mode, *args, **kwargs)
         return CancellableReader(stream) if path == source and mode == "rb" else stream
 
-    monkeypatch.setattr(pipeline.os, "replace", cross_device)
+    monkeypatch.setattr(artifacts.os, "replace", cross_device)
     monkeypatch.setattr(Path, "open", open_source)
     with pytest.raises(AppError) as error:
         ready.runner._publish_file(ready.task["id"], source, ready.output.parent, "output")
@@ -238,14 +239,14 @@ def test_unknown_registered_inputs_are_retained_when_cleanup_cannot_read_store(r
 def test_cross_device_publication_registers_only_complete_output(ready, monkeypatch):
     source = ready.video.parent / ready.output.name
     source.write_bytes(b"new complete encoded output")
-    original_replace = pipeline.os.replace
+    original_replace = artifacts.os.replace
 
     def cross_device(src, dst):
         if Path(src) == source:
             raise OSError(errno.EXDEV, "模拟跨盘输出")
         return original_replace(src, dst)
 
-    monkeypatch.setattr(pipeline.os, "replace", cross_device)
+    monkeypatch.setattr(artifacts.os, "replace", cross_device)
     result = ready.runner._publish_file(ready.task["id"], source, ready.output.parent, "output")
     assert result == ready.output
     assert result.read_bytes() == b"new complete encoded output"
@@ -348,7 +349,7 @@ def test_long_transcription_holds_old_provider_lease_through_switch(ready, monke
         assert ready.runner._transcriber is replacement
         return Transcript("zh", [Segment(0, 1, "完整的识别结果")])
 
-    monkeypatch.setattr(pipeline, "transcribe_long_audio", transcribe)
+    monkeypatch.setattr(speech, "transcribe_long_audio", transcribe)
     result, _ = ready.runner._stage_transcribe(ready.task, ready.video, Path("unused.wav"))
     assert result.segments[0].text == "完整的识别结果"
     assert previous.released and previous.active == 0

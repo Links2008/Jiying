@@ -26,7 +26,7 @@ _runtime_lock = threading.RLock()
 _check_lock = threading.Lock()
 _active_users = 0
 _ADAPTERS = {'app.services.downloader.native_ranges', 'app.services.engines.douyin_public',
-             'app.services.engines.xiaohongshu_public'}
+             'app.services.engines.xiaohongshu_public', 'app.services.engines.bilibili_quality'}
 
 
 def _vendor_dir() -> Path:
@@ -101,8 +101,18 @@ def _latest_release() -> tuple[str, str, str]:
     import requests
     headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'Jiying-Engine-Updater'}
     response = requests.get(GITHUB_API, timeout=HTTP_TIMEOUT, headers=headers)
-    response.raise_for_status()
-    release = response.json()
+    if getattr(response, 'status_code', 200) in (403, 429):
+        page = requests.get('https://github.com/yt-dlp/yt-dlp/releases/latest',
+                            timeout=HTTP_TIMEOUT, headers={'User-Agent': headers['User-Agent']})
+        page.raise_for_status()
+        match = re.fullmatch(r'https://github\.com/yt-dlp/yt-dlp/releases/tag/(\d{4}\.\d{1,2}\.\d{1,2})', page.url)
+        if not match:
+            raise RuntimeError('官方发布页未返回有效版本，保留当前引擎')
+        release = {'tag_name': match[1], 'assets': [{'name': 'yt-dlp',
+                   'browser_download_url': RELEASE_ROOT + match[1] + '/yt-dlp'}]}
+    else:
+        response.raise_for_status()
+        release = response.json()
     version = str(release.get('tag_name', ''))
     if release.get('draft') or release.get('prerelease') or not re.fullmatch(r'\d{4}\.\d{1,2}\.\d{1,2}', version):
         raise RuntimeError('官方发布版本无效，保留当前解析引擎')
@@ -158,12 +168,20 @@ def _install_release(url: str, sha256: str, version: str) -> None:
                 if archive.testzip():
                     raise RuntimeError('解析更新包损坏')
                 archive.extractall(directory, members=[e.filename for e in entries
-                                   if e.filename.startswith('yt_dlp/') and not e.is_dir()])
+                                   if e.filename.startswith(('yt_dlp/', 'yt_dlp_ejs/')) and not e.is_dir()])
         except zipfile.BadZipFile as error:
             raise RuntimeError('解析更新包格式错误') from error
         source = Path(directory) / 'yt_dlp'
         if _parse_ver(_package_version(source)) != _parse_ver(version) or not (source / '__init__.py').is_file():
             raise RuntimeError('解析更新包版本不符')
+        solver = Path(directory) / 'yt_dlp_ejs'
+        if solver.exists():
+            if not all((solver / name).is_file() for name in ('__init__.py', '_version.py',
+                    'yt/solver/__init__.py', 'yt/solver/core.min.js', 'yt/solver/lib.min.js')):
+                raise RuntimeError('解析更新包的 YouTube 组件不完整')
+            # 与主解析器放在同一原子替换目录，回退时不会遗留错配脚本。
+            (source / '_jiying_ejs').mkdir()
+            solver.replace(source / '_jiying_ejs' / 'yt_dlp_ejs')
         for file in source.rglob('*.py'):
             compile(file.read_bytes(), str(file), 'exec')
         with _runtime_lock:
@@ -186,21 +204,36 @@ def _install_release(url: str, sha256: str, version: str) -> None:
 
 def _evict_ytdlp() -> None:
     for name in list(sys.modules):
-        if name == 'yt_dlp' or name.startswith('yt_dlp.') or name in _ADAPTERS:
+        if _runtime_module(name):
             sys.modules.pop(name, None)
 
 
+def _runtime_module(name: str) -> bool:
+    return name in {'yt_dlp', 'yt_dlp_ejs'} or name.startswith(('yt_dlp.', 'yt_dlp_ejs.')) or name in _ADAPTERS
+
+
 def _smoke_test(expected: str) -> bool:
+    root = str(_vendor_dir() / 'yt_dlp' / '_jiying_ejs')
+    added = Path(root).is_dir() and root not in sys.path
     try:
         _evict_ytdlp()
+        if added:
+            sys.path.insert(0, root)
         import yt_dlp
         if _parse_ver(yt_dlp.version.__version__) != _parse_ver(expected):
             return False
         yt_dlp.YoutubeDL({'quiet': True}).close()
+        if Path(root).is_dir():
+            from yt_dlp_ejs.yt.solver import core, lib
+            if not core() or not lib():
+                return False
         return True
     except Exception as error:
         log.warning('解析引擎自检失败：%s', error)
         return False
+    finally:
+        if added and root in sys.path:
+            sys.path.remove(root)
 
 
 def _activate_pending() -> str:
@@ -211,7 +244,7 @@ def _activate_pending() -> str:
         vendor = _vendor_dir()
         current, previous = vendor / 'yt_dlp', vendor / 'yt_dlp.old'
         modules = {name: module for name, module in sys.modules.copy().items()
-                   if name == 'yt_dlp' or name.startswith('yt_dlp.') or name in _ADAPTERS}
+                   if _runtime_module(name)}
         root = str(vendor)
         added = root not in sys.path
         if added:

@@ -13,6 +13,7 @@ root = os.path.abspath(os.path.join(SPECPATH, ".."))  # SPECPATH = build/ 所在
 
 # bin/ 外部工具随包分发（ffmpeg/aria2c/yt-dlp，CI 或手工放入项目 bin/）
 datas = [(str(Path(root) / "bin"), "bin"),
+         (str(Path(root) / "app" / "VERSION"), "app"),
          (str(Path(root) / "app" / "web"), "app/web")]  # 内嵌 Web UI
 # faster-whisper 的 tokenizer 资源文件
 datas += collect_data_files("faster_whisper")

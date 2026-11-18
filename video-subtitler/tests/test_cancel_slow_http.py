@@ -5,6 +5,7 @@ import socket
 import subprocess
 import threading
 import time
+from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -72,8 +73,9 @@ def test_cancel_api_stops_actual_slow_transfer(tmp_path, monkeypatch, rpc_availa
     rpc = Aria2cRpcClient(f"http://127.0.0.1:{rpc_port}/jsonrpc", timeout=1)
     process, task = None, None
     app = server.create_app()
-    cfg = server._config
+    cfg = app.state.runtime.config
     cfg.set("download.aria2c.rpc_url", rpc._url)
+    cfg.set("download.aria2c.mode", "external")
     cfg.set("download.aria2c.enabled", True)
     cfg.set("download.aria2c.poll_interval", .05)
     cfg.set("download.aria2c.max_conn_per_server", 1)
@@ -81,7 +83,14 @@ def test_cancel_api_stops_actual_slow_transfer(tmp_path, monkeypatch, rpc_availa
     cfg.set("download.proxy_mode", "direct")
     cfg.set("cookies", "")
     cfg.set("cookies_from_browser", "")
-    monkeypatch.setattr(server._router, "probe", lambda *_: ("local", SimpleNamespace(title="slow clip")))
+    monkeypatch.setattr(app.state.runtime.router, "probe", lambda *_: ("local", SimpleNamespace(title="slow clip")))
+
+    def cancel_pending_task():
+        store = app.state.runtime.store
+        if task and store.get_task(task["id"])["status"] in ("pending", "running"):
+            cancel.cancel(task["id"])
+            wait_for(lambda: store.get_task(task["id"])["status"] not in ("pending", "running"))
+
     try:
         if rpc_available:
             env = {key: value for key, value in os.environ.items()
@@ -98,7 +107,8 @@ def test_cancel_api_stops_actual_slow_transfer(tmp_path, monkeypatch, rpc_availa
                 except Exception:
                     return False
             wait_for(ready)
-        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as api:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as api, ExitStack() as cleanup:
+            cleanup.callback(cancel_pending_task)
             body = {"url": f"http://127.0.0.1:{http.server_port}/slow.mp4"}
             response = api.post("/api/v1/tasks", json=body)
             assert response.status_code == 200, response.text
@@ -106,12 +116,12 @@ def test_cancel_api_stops_actual_slow_transfer(tmp_path, monkeypatch, rpc_availa
             duplicate = api.post("/api/v1/tasks", json=body)
             assert duplicate.status_code == 200
             assert duplicate.json()["id"] == task["id"]
-            assert len(server._store.list_tasks()) == 1
+            assert len(app.state.runtime.store.list_tasks()) == 1
             wait_for(lambda: state["sent"] >= 65536)
             started = time.monotonic()
             cancellation = api.post(f"/api/v1/tasks/{task['id']}/cancel")
             assert cancellation.status_code == 200, cancellation.text
-            wait_for(lambda: server._store.get_task(task["id"])["status"] == "cancelled")
+            wait_for(lambda: app.state.runtime.store.get_task(task["id"])["status"] == "cancelled")
             terminal_seconds = time.monotonic() - started
             final = api.get(f"/api/v1/tasks/{task['id']}")
             assert final.status_code == 200
@@ -122,7 +132,7 @@ def test_cancel_api_stops_actual_slow_transfer(tmp_path, monkeypatch, rpc_availa
                 assert rpc._call("tellWaiting", [0, 10]) == []
                 stopped = rpc._call("tellStopped", [0, 10])
                 assert stopped and all(job["status"] == "removed" for job in stopped)
-            partial_dir = server._runner._data / "tmp" / task["id"]
+            partial_dir = app.state.runtime.runner._data / "tmp" / task["id"]
             def sizes():
                 return {p.name: p.stat().st_size for p in partial_dir.rglob("*") if p.is_file()}
             first_sizes, sent, requests = sizes(), state["sent"], state["requests"]
@@ -132,7 +142,7 @@ def test_cancel_api_stops_actual_slow_transfer(tmp_path, monkeypatch, rpc_availa
             assert requests == 1, "duplicate submit must not start a second transfer"
             assert 0 < sent < size, "cancellation must stop before the full payload is sent"
             assert first_sizes, "cancel must preserve partial files for explicit retry"
-            jobs = server._store._exec("SELECT status,backend FROM download_job WHERE task_id=?",
+            jobs = app.state.runtime.store._exec("SELECT status,backend FROM download_job WHERE task_id=?",
                                       (task["id"],)).fetchall()
             assert [job["status"] for job in jobs] == ["cancelled"]
             report = os.environ.get("JIYING_CANCEL_REPORT", "")
@@ -151,9 +161,6 @@ def test_cancel_api_stops_actual_slow_transfer(tmp_path, monkeypatch, rpc_availa
                 path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     finally:
         stop.set()
-        if task and server._store.get_task(task["id"])["status"] in ("pending", "running"):
-            cancel.cancel(task["id"])
-            wait_for(lambda: server._store.get_task(task["id"])["status"] not in ("pending", "running"))
         if process:
             process.terminate()
             try:

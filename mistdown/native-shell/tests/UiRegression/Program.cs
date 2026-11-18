@@ -1,7 +1,6 @@
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -33,8 +32,7 @@ internal static class Program
         var previousSettingsPath = Environment.GetEnvironmentVariable("JIYING_UI_SETTINGS_PATH");
         Environment.SetEnvironmentVariable("JIYING_UI_SETTINGS_PATH", settingsPath);
         var originalSettings = File.Exists(settingsPath) ? File.ReadAllBytes(settingsPath) : null;
-        var settingsType = typeof(MainWindow).Assembly.GetType("Jiying.Desktop.UiSettings")!;
-        var effectiveSettingsPath = (string)settingsType.GetProperty("SettingsPath", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        var effectiveSettingsPath = UiSettings.SettingsPath;
         if (effectiveSettingsPath != settingsPath)
         {
             Console.Error.WriteLine("FAIL UI regression requires isolated settings before opening a window");
@@ -42,8 +40,8 @@ internal static class Program
             return 1;
         }
         var window = new MainWindow();
-        var loaded = typeof(MainWindow).GetMethod("Window_Loaded", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        window.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(typeof(RoutedEventHandler), window, loaded);
+
+        window.Loaded -= window.Window_Loaded;
         // 专项 Wine 宿主只替换测试中文回退；完整 Windows 回归仍检查产品字体。
         if (subtitleWorkflowOnly && Environment.GetEnvironmentVariable("WINEPREFIX") is not null)
             window.Resources["AppFont"] = new FontFamily(new Uri("pack://application:,,,/Jiying.Native;component/Assets/Fonts/"),
@@ -54,8 +52,16 @@ internal static class Program
             try
             {
                 await Task.Delay(600);
+                if (int.TryParse(Environment.GetEnvironmentVariable("JIYING_LIVE_ENGINE_PORT"), out var livePort))
+                { await LiveParseRegression.Run(window, livePort, Check, Capture); return; }
+                if (Environment.GetEnvironmentVariable("JIYING_SIMPLE_PARSE_ONLY") == "1")
+                { await SimpleParseRegression.Run(window, Check); return; }
+                if (Environment.GetEnvironmentVariable("JIYING_SUBTITLE_OUTPUT_ONLY") == "1")
+                { await SubtitleOutputRegression.Run(window, Check, Capture); return; }
                 if (Environment.GetEnvironmentVariable("JIYING_NAV_OUTLINE_ONLY") == "1")
                 { await NavOutlineRegression.Run(window, Check); return; }
+                if (Environment.GetEnvironmentVariable("JIYING_SCROLL_ONLY") == "1")
+                { await ScrollRegression.Run(window, Check); return; }
                 if (Environment.GetEnvironmentVariable("JIYING_DISCOVERY_ONLY") == "1")
                 { await EngineDiscoveryRegression.Run(window, Check); return; }
                 if (Environment.GetEnvironmentVariable("JIYING_RESULT_MOTION_ONLY") == "1")
@@ -77,57 +83,57 @@ internal static class Program
                 await CheckSubtitleEntry();
                 if (Environment.GetEnvironmentVariable("JIYING_SUBTITLE_ONLY") == "1") return;
                 CheckPlatformLogin();
+                await SimpleParseRegression.Run(window, Check);
                 await CheckSettingsUx();
                 await CompletionNotificationRegression.Run(window, Check);
+                window.ShowView("parse");
                 if (Environment.GetEnvironmentVariable("JIYING_LIGHTWEIGHT_ONLY") == "1")
                 {
-                    var normalize = typeof(MainWindow).GetMethod("NormalizeUrl", BindingFlags.Static | BindingFlags.NonPublic)!;
-                    Check((string)normalize.Invoke(null, ["复制打开抖音 https://v.douyin.com/abc/ 看视频！"])! == "https://v.douyin.com/abc/", "Copied share text extracts its video link");
-                    Check((string)normalize.Invoke(null, ["https://www.douyin.com/?recommend=1&modal_id=6961737553342991651"])! == "https://www.douyin.com/video/6961737553342991651", "Douyin modal links retain the selected video");
+                    Check(MainWindow.NormalizeUrl("复制打开抖音 https://v.douyin.com/abc/ 看视频！") == "https://v.douyin.com/abc/", "Copied share text extracts its video link");
+                    Check(MainWindow.NormalizeUrl("https://www.douyin.com/?recommend=1&modal_id=6961737553342991651") == "https://www.douyin.com/video/6961737553342991651", "Douyin modal links retain the selected video");
                     Check(window.FindName("AdvancedSettings") is Expander { IsExpanded: false }, "Low-frequency settings start collapsed");
                     Check(window.FindName("SpeechSettings") is Expander { IsExpanded: false }, "Speech and translation start collapsed in one page");
-                    Check(Field<StackPanel>("AsrCloudSettings").Visibility == Visibility.Collapsed && Field<StackPanel>("LlmCloudSettings").Visibility == Visibility.Collapsed, "Inactive cloud parameters are hidden");
-                    SetStatus("GpuStatus", "ApplyGpuStatus", """{"supported":false,"status":"idle","size_bytes":553162896}""");
-                    Check(!Field<Button>("DownloadGpuButton").IsEnabled && Field<TextBlock>("GpuStatusText").Text.Contains("CPU"), "CPU-only machines do not download GPU components");
-                    SetStatus("GpuStatus", "ApplyGpuStatus", """{"supported":true,"status":"downloading","fraction":0.4,"size_bytes":553162896}""");
-                    Check(!Field<Button>("DownloadGpuButton").IsEnabled && Field<ProgressBar>("GpuProgress").Visibility == Visibility.Visible, "GPU download progress prevents duplicate requests");
-                    SetStatus("GpuStatus", "ApplyGpuStatus", """{"supported":true,"status":"failed","error":"test","size_bytes":553162896}""");
-                    Check(Field<Button>("DownloadGpuButton").IsEnabled && Field<TextBlock>("GpuStatusText").Text.Contains("CPU"), "GPU failures keep CPU available and offer retry");
-                    SetStatus("GpuStatus", "ApplyGpuStatus", """{"supported":true,"status":"idle","size_bytes":553162896}""");
-                    typeof(MainWindow).GetField("_loadingControls", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, true);
-                    Field<TextBox>("AsrBaseSettingsBox").Text = "https://saved.example/asr";
-                    Field<TextBox>("LlmBaseSettingsBox").Text = "https://saved.example/llm";
-                    Field<ComboBox>("AsrProviderSettingsBox").SelectedValue = "cloud";
-                    Field<ComboBox>("TranslationSettingsBox").SelectedValue = "llm";
-                    Call("SyncDependentControls", false);
-                    Check(Field<StackPanel>("AsrCloudSettings").Visibility == Visibility.Visible && Field<StackPanel>("LlmCloudSettings").Visibility == Visibility.Visible && Field<Grid>("GpuSettingsRow").Visibility == Visibility.Collapsed, "Cloud controls appear only for selected services");
-                    Field<ComboBox>("AsrProviderSettingsBox").SelectedValue = "faster-whisper";
-                    Field<ComboBox>("TranslationSettingsBox").SelectedValue = "null";
-                    Call("SyncDependentControls", false);
-                    Check(Field<TextBox>("AsrBaseSettingsBox").Text.Contains("saved.example") && Field<TextBox>("LlmBaseSettingsBox").Text.Contains("saved.example"), "Collapsing inactive controls preserves saved configuration");
-                    typeof(MainWindow).GetField("_loadingControls", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, false);
-                    Call("ShowView", "settings");
+                    Check(window.AsrCloudSettings.Visibility == Visibility.Collapsed && window.LlmCloudSettings.Visibility == Visibility.Collapsed, "Inactive cloud parameters are hidden");
+                    SetGpuStatus("""{"supported":false,"status":"idle","size_bytes":553162896}""");
+                    Check(!window.DownloadGpuButton.IsEnabled && window.GpuStatusText.Text.Contains("CPU"), "CPU-only machines do not download GPU components");
+                    SetGpuStatus("""{"supported":true,"status":"downloading","fraction":0.4,"size_bytes":553162896}""");
+                    Check(!window.DownloadGpuButton.IsEnabled && window.GpuProgress.Visibility == Visibility.Visible, "GPU download progress prevents duplicate requests");
+                    SetGpuStatus("""{"supported":true,"status":"failed","error":"test","size_bytes":553162896}""");
+                    Check(window.DownloadGpuButton.IsEnabled && window.GpuStatusText.Text.Contains("CPU"), "GPU failures keep CPU available and offer retry");
+                    SetGpuStatus("""{"supported":true,"status":"idle","size_bytes":553162896}""");
+                    window.ControlsAreLoading = true;
+                    window.AsrBaseSettingsBox.Text = "https://saved.example/asr";
+                    window.LlmBaseSettingsBox.Text = "https://saved.example/llm";
+                    window.AsrProviderSettingsBox.SelectedValue = "cloud";
+                    window.TranslationSettingsBox.SelectedValue = "llm";
+                    window.SyncDependentControls(false);
+                    Check(window.AsrCloudSettings.Visibility == Visibility.Visible && window.LlmCloudSettings.Visibility == Visibility.Visible && window.GpuSettingsRow.Visibility == Visibility.Collapsed, "Cloud controls appear only for selected services");
+                    window.AsrProviderSettingsBox.SelectedValue = "faster-whisper";
+                    window.TranslationSettingsBox.SelectedValue = "null";
+                    window.SyncDependentControls(false);
+                    Check(window.AsrBaseSettingsBox.Text.Contains("saved.example") && window.LlmBaseSettingsBox.Text.Contains("saved.example"), "Collapsing inactive controls preserves saved configuration");
+                    window.ControlsAreLoading = false;
+                    window.ShowView("settings");
                     await Task.Delay(550);
                     var output = Environment.GetEnvironmentVariable("JIYING_SETTINGS_OUTPUT");
                     if (!string.IsNullOrWhiteSpace(output))
                     {
-                        var uiSettings = typeof(MainWindow).GetField("_ui", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-                        var uiTheme = uiSettings.GetType().GetProperty("Theme")!;
+                        var uiSettings = window.Settings;
                         foreach (var dimensions in new[] { (1160, 720), (860, 560) })
                         foreach (var mode in new[] { "dark", "light" })
                         {
                             window.Width = dimensions.Item1;
                             window.Height = dimensions.Item2;
-                            uiTheme.SetValue(uiSettings, mode);
-                            Call("ApplyAppearance");
-                            Field<ScrollViewer>("SettingsScroller").ScrollToTop();
+                            uiSettings.Theme = mode;
+                            window.ApplyAppearance();
+                            window.SettingsScroller.ScrollToTop();
                             window.UpdateLayout();
                             await Task.Delay(160);
                             Environment.SetEnvironmentVariable("JIYING_SETTINGS_CAPTURE", Path.Combine(output, $"即影设置-{mode}-{dimensions.Item1}x{dimensions.Item2}.png"));
                             Capture("JIYING_SETTINGS_CAPTURE");
-                            Field<Expander>("SpeechSettings").IsExpanded = true;
-                            Field<Expander>("GpuAdvancedSettings").IsExpanded = true;
-                            Field<Expander>("AdvancedSettings").IsExpanded = true;
+                            window.SpeechSettings.IsExpanded = true;
+                            window.GpuAdvancedSettings.IsExpanded = true;
+                            window.AdvancedSettings.IsExpanded = true;
                             window.UpdateLayout();
                             await Task.Delay(300);
                             Environment.SetEnvironmentVariable("JIYING_SETTINGS_CAPTURE", Path.Combine(output, $"即影设置展开-{mode}-{dimensions.Item1}x{dimensions.Item2}.png"));
@@ -135,20 +141,20 @@ internal static class Program
                             foreach (var name in new[] { "WhisperSettingsBox", "DownloadWhisperButton", "DownloadGpuButton", "ThemeDarkButton", "ThemeAutoButton" })
                             {
                                 var control = Field<FrameworkElement>(name);
-                                var controlPosition = control.TranslatePoint(new Point(), Field<ScrollViewer>("SettingsScroller"));
-                                Check(control.ActualWidth > 0 && controlPosition.X >= 0 && controlPosition.X + control.ActualWidth <= Field<ScrollViewer>("SettingsScroller").ActualWidth + 1, $"{name} fits {mode} {dimensions.Item1}");
+                                var controlPosition = control.TranslatePoint(new Point(), window.SettingsScroller);
+                                Check(control.ActualWidth > 0 && controlPosition.X >= 0 && controlPosition.X + control.ActualWidth <= window.SettingsScroller.ActualWidth + 1, $"{name} fits {mode} {dimensions.Item1}");
                             }
-                            Field<Expander>("SpeechSettings").IsExpanded = false;
-                            Field<Expander>("GpuAdvancedSettings").IsExpanded = false;
-                            Field<ScrollViewer>("SettingsScroller").ScrollToBottom();
+                            window.SpeechSettings.IsExpanded = false;
+                            window.GpuAdvancedSettings.IsExpanded = false;
+                            window.SettingsScroller.ScrollToBottom();
                             window.UpdateLayout();
                             await Task.Delay(300);
-                            var previewScroller = Field<ScrollViewer>("SettingsScroller");
+                            var previewScroller = window.SettingsScroller;
                             Check(previewScroller.VerticalOffset > 0 && Math.Abs(previewScroller.VerticalOffset - previewScroller.ScrollableHeight) < 1,
                                   $"Expanded advanced settings remain reachable in {mode} {dimensions.Item1}");
                             Environment.SetEnvironmentVariable("JIYING_SETTINGS_CAPTURE", Path.Combine(output, $"即影高级设置-{mode}-{dimensions.Item1}x{dimensions.Item2}.png"));
                             Capture("JIYING_SETTINGS_CAPTURE");
-                            Field<Expander>("AdvancedSettings").IsExpanded = false;
+                            window.AdvancedSettings.IsExpanded = false;
                         }
                     }
                     return;
@@ -159,7 +165,7 @@ internal static class Program
                 Check(window.FindName("EnhanceCard") is null, "Anime 超分入口已移除");
                 Check(window.FindName("RefreshQualityButton") is Button, "画质可在解析页强制刷新");
                 Check(window.FindName("FormatList") is ComboBox { Height: <= 44 }, "画质使用紧凑原生下拉，无需滚动页面");
-                var start = Field<Button>("SubmitButton");
+                var start = window.SubmitButton;
                 start.ApplyTemplate();
                 Check(start.Template.FindName("Sheen", start) is null, "开始按钮没有覆盖文字的扫光");
                 Check(window.FindName("WhisperPrompt") is FrameworkElement { Visibility: Visibility.Collapsed } &&
@@ -182,31 +188,31 @@ internal static class Program
                 Check(window.FindName("BilibiliQrPanel") is FrameworkElement { Visibility: Visibility.Collapsed } &&
                       window.FindName("BilibiliQrImage") is Image && window.FindName("BilibiliQrStatus") is TextBlock,
                       "扫码面板、二维码与状态控件存在且初始隐藏");
-                var defaultPath = (string)settingsType.GetProperty("DefaultOutputDirectory", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+                var defaultPath = UiSettings.DefaultOutputDirectory;
                 Check(defaultPath == (Directory.Exists(@"D:\") ? @"D:\即影\Downloads" : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "即影")),
                       "New installations prefer D drive and fall back when D is absent");
                 Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
                 File.WriteAllText(settingsPath, """{"outputDirectory":"D:\\即影\\Downloads"}""");
-                var migrated = settingsType.GetMethod("Load")!.Invoke(null, null)!;
-                Check((string)settingsType.GetProperty("OutputDirectory")!.GetValue(migrated)! ==
+                var migrated = UiSettings.Load();
+                Check(migrated.OutputDirectory ==
                       (Directory.Exists(@"D:\") ? @"D:\即影\Downloads" : defaultPath),
                       "D drive default is kept even before its download folder is created");
                 var customPath = Path.GetTempPath();
                 File.WriteAllText(settingsPath, System.Text.Json.JsonSerializer.Serialize(new { outputDirectory = customPath }));
-                var custom = settingsType.GetMethod("Load")!.Invoke(null, null)!;
-                Check((string)settingsType.GetProperty("OutputDirectory")!.GetValue(custom)! == customPath,
+                var custom = UiSettings.Load();
+                Check(custom.OutputDirectory == customPath,
                       "Existing custom output directories are preserved");
-                SetStatus("WhisperStatus", "ApplyWhisperStatus", """{"model":"small","status":"downloaded","downloaded":true}""");
-                Check(!Field<TextBlock>("WhisperStatusText").Text.Contains("已载入") &&
-                      Field<TextBlock>("WhisperStatusText").Text.Contains("首次识别"), "Cached Whisper files are not reported as loaded");
-                SetStatus("WhisperStatus", "ApplyWhisperStatus", """{"model":"small","status":"loading","downloaded":true}""");
-                Check(Field<ProgressBar>("WhisperProgress").IsIndeterminate && !Field<Button>("DownloadWhisperButton").IsEnabled,
+                SetWhisperStatus("""{"model":"small","status":"downloaded","downloaded":true}""");
+                Check(!window.WhisperStatusText.Text.Contains("已载入") &&
+                      window.WhisperStatusText.Text.Contains("首次识别"), "Cached Whisper files are not reported as loaded");
+                SetWhisperStatus("""{"model":"small","status":"loading","downloaded":true}""");
+                Check(window.WhisperProgress.IsIndeterminate && !window.DownloadWhisperButton.IsEnabled,
                       "Whisper loading has a distinct busy state");
-                SetStatus("WhisperStatus", "ApplyWhisperStatus", """{"model":"small","status":"load_failed","downloaded":true,"message":"模型已下载，但载入失败：测试错误"}""");
-                Check(Field<TextBlock>("WhisperStatusText").Text.Contains("载入失败") && Field<Button>("DownloadWhisperButton").IsEnabled,
+                SetWhisperStatus("""{"model":"small","status":"load_failed","downloaded":true,"message":"模型已下载，但载入失败：测试错误"}""");
+                Check(window.WhisperStatusText.Text.Contains("载入失败") && window.DownloadWhisperButton.IsEnabled,
                       "Whisper load failure preserves the download and offers retry");
-                SetStatus("WhisperStatus", "ApplyWhisperStatus", """{"model":"small","status":"ready","downloaded":true,"message":"small 已载入"}""");
-                Check(Field<TextBlock>("WhisperStatusText").Text == "small 已载入", "Whisper ready status respects the engine message");
+                SetWhisperStatus("""{"model":"small","status":"ready","downloaded":true,"message":"small 已载入"}""");
+                Check(window.WhisperStatusText.Text == "small 已载入", "Whisper ready status respects the engine message");
                 Check(window.FontFamily.Source.Contains("Sora"), "Original UI font stack");
                 InspectVisual(window);
                 Check(glyphFonts.Any(f => f.Contains("sora", StringComparison.OrdinalIgnoreCase)), "Visible Latin text uses bundled Sora glyphs");
@@ -220,42 +226,42 @@ internal static class Program
                     Check(face.TryGetGlyphTypeface(out var glyph) && glyph.Weight == weight, $"Sora maps requested weight {weight} without substituting bold");
                     Console.WriteLine($"FONT {weight} => {glyph?.Weight} {glyph?.FontUri}");
                 }
-                Call("ShowView", "settings");
+                window.ShowView("settings");
                 await Task.Delay(550);
-                var slider = Field<Slider>("ConcurrencySlider");
+                var slider = window.ConcurrencySlider;
                 slider.ApplyTemplate();
                 var track = (Track)slider.Template.FindName("PART_Track", slider);
                 Check(track.ActualHeight >= track.Thumb.ActualHeight, "Slider thumb fits its track");
-                var move = Field<TranslateTransform>("NavThumbMove");
+                var move = window.NavThumbMove;
                 var before = move.Y;
-                Call("ShowView", "done");
+                window.ShowView("done");
                 Check(Math.Abs(move.Y - before) < 2, "Navigation starts at its current position");
                 await Task.Delay(40);
                 before = move.Y;
-                Call("ShowView", "queue");
+                window.ShowView("queue");
                 Check(Math.Abs(move.Y - before) < 2, "Interrupted navigation remains continuous");
-                Call("ShowView", "settings");
-                Call("ShowView", "parse");
+                window.ShowView("settings");
+                window.ShowView("parse");
                 await Task.Delay(650);
                 var pages = new[] { "ParseView", "QueueView", "DoneView", "SettingsView" }.Select(Field<FrameworkElement>).ToArray();
                 Check(pages.Count(p => p.Visibility == Visibility.Visible) == 1 && pages[0].Visibility == Visibility.Visible, "Rapid switching leaves exactly the requested page");
                 Check(pages[0].IsHitTestVisible && pages[0].Opacity == 1 && pages[0].Effect is null, "Rapid switching clears stale effects and restores input");
-                var button = Field<Button>("ProbeButton");
+                var button = window.ProbeButton;
                 var content = button.Content;
-                var urlBox = Field<TextBox>("UrlBox");
+                var urlBox = window.UrlBox;
                 urlBox.ApplyTemplate();
                 Check(((Border)urlBox.Template.FindName("Chrome", urlBox)).BorderThickness == new Thickness(0), "Parse URL input has no nested frame");
-                var loginBar = Field<FrameworkElement>("BilibiliLoginBar");
+                var loginBar = window.BilibiliLoginBar;
                 foreach (var url in new[] { "https://www.bilibili.com/video/BV1tFZZBQE57", "https://b23.tv/example" })
                 {
                     urlBox.Text = url;
-                    Check(loginBar.Visibility == Visibility.Visible, "B 站链接显示解析页登录入口");
+                    Check(loginBar.Visibility == Visibility.Collapsed, "B 站链接先直接解析，不提前显示账号配置");
                 }
                 urlBox.Text = "https://example.com/video";
                 Check(loginBar.Visibility == Visibility.Collapsed, "普通链接隐藏 B 站登录入口");
                 urlBox.Text = "";
-                var authSource = Field<ComboBox>("ParseAuthSourceBox");
-                var parseCookiesFile = Field<TextBox>("ParseCookiesFileBox");
+                var authSource = window.ParseAuthSourceBox;
+                var parseCookiesFile = window.ParseCookiesFileBox;
                 Check(window.FindName("CookiesBrowserBox") is null && window.FindName("CookiesFileBox") is null,
                       "高级设置已移除重复 Cookie 登录入口");
                 Check(authSource.Items.OfType<ComboBoxItem>().Select(item => item.Tag?.ToString())
@@ -263,7 +269,7 @@ internal static class Program
                       "解析页保留已有登录来源与扫码后的会话读取");
                 authSource.SelectedValue = "file";
                 Check(parseCookiesFile.Visibility == Visibility.Visible && parseCookiesFile.IsReadOnly &&
-                      Field<Button>("BrowseCookiesButton").Visibility == Visibility.Visible, "解析页选择文件仍提供路径和选择按钮");
+                      window.BrowseCookiesButton.Visibility == Visibility.Visible, "解析页选择文件仍提供路径和选择按钮");
                 foreach (var source in new[] { "edge", "chrome", "firefox", "" })
                 {
                     parseCookiesFile.Text = Path.Combine(Path.GetDirectoryName(settingsPath)!, "cookies-test.txt");
@@ -271,76 +277,101 @@ internal static class Program
                     Check(parseCookiesFile.Text == "" && parseCookiesFile.Visibility == Visibility.Collapsed,
                           $"解析页切换登录来源 {source} 仅清理尚未提交的文件选择");
                 }
-                var recognize = Field<CheckBox>("RecognizeCheck");
-                var translate = Field<CheckBox>("TranslateCheck");
-                var subtitleMode = Field<ComboBox>("SubtitleModeBox");
-                var subtitleAdvanced = Field<Expander>("SubtitleAdvanced");
-                Check(subtitleMode.Items.Count == 3 && !subtitleAdvanced.IsExpanded,
-                      "Subtitle choices start with three modes and collapsed advanced settings");
+                var recognize = window.RecognizeCheck;
+                var translate = window.TranslateCheck;
+                var subtitleMode = window.SubtitleModeBox;
+                var subtitleAdvanced = window.SubtitleAdvanced;
+                Check(subtitleMode.Items.Count == 4 && !subtitleAdvanced.IsExpanded,
+                      "字幕模式包含只识别画面人名，高级选项默认折叠");
+                subtitleMode.SelectedValue = "visual";
+                Check(recognize.IsChecked != true && translate.IsChecked != true &&
+                      window.SubtitleOutputBox.IsEnabled && await window.EnsureWhisperReadyAsync(),
+                      "画面识别可单独输出样式轨，无需语音模型");
                 subtitleMode.SelectedValue = "source";
                 await Task.Delay(270);
                 Check(recognize.IsChecked == true && translate.IsChecked != true &&
-                      Field<FrameworkElement>("TranslationLanguageRow").Visibility == Visibility.Collapsed,
+                      window.TranslationLanguageRow.Visibility == Visibility.Collapsed,
                       "Source subtitle mode enables recognition without translation choices");
                 subtitleMode.SelectedValue = "translate";
                 await Task.Delay(270);
                 Check(recognize.IsChecked == true && translate.IsChecked == true &&
-                      Field<ComboBox>("TranslationParseBox").SelectedValue?.ToString() == "llm" &&
-                      Field<FrameworkElement>("TranslationLanguageRow").Visibility == Visibility.Visible,
+                      window.TranslationParseBox.SelectedValue?.ToString() == "llm" &&
+                      window.TranslationLanguageRow.Visibility == Visibility.Visible,
                       "Translation mode enables recognition and its translation provider together");
-                Field<CheckBox>("BurnCheck").IsChecked = true;
+                var personNotes = window.PersonNotesCheck;
+                Check(personNotes.Visibility == Visibility.Visible && personNotes.IsChecked == false,
+                      "翻译模式提供默认关闭的英文人名注释");
+                window.SubtitleOutputBox.SelectedValue = "burn";
                 subtitleMode.SelectedValue = "none";
                 await Task.Delay(270);
                 Check(recognize.IsChecked != true && translate.IsChecked != true &&
-                      Field<CheckBox>("BurnCheck").IsChecked != true &&
-                      Field<FrameworkElement>("BurnCard").Visibility == Visibility.Collapsed,
+                      window.SubtitleOutputBox.SelectedValue?.ToString() == "softmux" &&
+                      window.BurnCard.Visibility == Visibility.Collapsed,
                       "No-subtitle mode clears dependent switches and hides burn settings");
+                Check(personNotes.Visibility == Visibility.Collapsed, "未翻译时隐藏人名注释入口");
                 translate.IsChecked = false;
                 recognize.IsChecked = false;
-                Call("SyncDependentControls", false);
+                window.SyncDependentControls(false);
                 recognize.IsChecked = true;
-                Call("SyncDependentControls", true);
-                var recognitionOptions = Field<FrameworkElement>("RecognitionOptions");
-                Check(recognitionOptions.Visibility == Visibility.Visible && (!SystemParameters.ClientAreaAnimation || !double.IsPositiveInfinity(recognitionOptions.MaxHeight)), "Recognition options expand with motion");
+                window.SyncDependentControls(true);
+                var recognitionOptions = window.RecognitionOptions;
+                Check(recognitionOptions.Visibility == Visibility.Visible && (!SystemParameters.ClientAreaAnimation || double.IsFinite(recognitionOptions.Height)), "Recognition options expand with motion");
                 recognize.IsChecked = false;
-                Call("SyncDependentControls", true);
+                window.SyncDependentControls(true);
                 recognize.IsChecked = true;
-                Call("SyncDependentControls", true);
+                window.SyncDependentControls(true);
                 await Task.Delay(270);
-                Check(recognitionOptions.Visibility == Visibility.Visible && double.IsPositiveInfinity(recognitionOptions.MaxHeight), "Interrupted recognition motion settles in the latest state");
+                Check(recognitionOptions.Visibility == Visibility.Visible && double.IsNaN(recognitionOptions.Height) && recognitionOptions.ActualHeight > 0, "Interrupted recognition motion settles in the latest state");
                 recognize.IsChecked = false;
-                Call("SyncDependentControls", false);
+                window.SyncDependentControls(false);
                 translate.IsChecked = true;
-                Call("SubtitleMode_Changed", translate, new RoutedEventArgs());
-                var translationRow = Field<FrameworkElement>("TranslationLanguageRow");
-                Check(recognize.IsChecked == true && translationRow.Visibility == Visibility.Visible && (!SystemParameters.ClientAreaAnimation || !double.IsPositiveInfinity(translationRow.MaxHeight)), "Translation switch expands dependent options with motion");
+                window.SubtitleMode_Changed(translate, new RoutedEventArgs());
+                var translationRow = window.TranslationLanguageRow;
+                Check(recognize.IsChecked == true && translationRow.Visibility == Visibility.Visible && (!SystemParameters.ClientAreaAnimation || double.IsFinite(translationRow.Height)), "Translation switch expands dependent options with motion");
                 await Task.Delay(270);
-                Check(double.IsPositiveInfinity(translationRow.MaxHeight), "Translation motion finishes without clipping content");
+                Check(double.IsNaN(translationRow.Height) && !translationRow.HasAnimatedProperties, "Translation motion finishes without clipping content");
+                subtitleMode.SelectedValue = "visual";
+                await Task.Delay(270);
+                Check(recognize.IsChecked != true && translate.IsChecked != true &&
+                      translate.Visibility == Visibility.Visible && translationRow.Visibility == Visibility.Visible &&
+                      window.TranslationProviderRow.Visibility == Visibility.Visible &&
+                      window.SpeechModelRow.Visibility == Visibility.Collapsed,
+                      "画面人名模式开放翻译入口并隐藏语音模型设置");
+                translate.IsChecked = true;
+                window.SubtitleMode_Changed(translate, new RoutedEventArgs());
+                Check(recognize.IsChecked != true && subtitleMode.SelectedValue?.ToString() == "visual",
+                      "翻译画面人名时继续保持仅画面模式");
+                subtitleMode.SelectedValue = "none";
                 translate.IsChecked = false;
                 recognize.IsChecked = false;
-                Call("SyncDependentControls", false);
-                var hero = Field<FrameworkElement>("ParseHero");
-                var heroTop = hero.TranslatePoint(new Point(), Field<FrameworkElement>("ParseView")).Y;
-                Call("SetProbeBusy", true);
-                Check(Field<FrameworkElement>("ParseLoading").Visibility == Visibility.Visible, "Loading skeleton is visible during analysis");
+                window.SyncDependentControls(false);
+                var hero = window.ParseHero;
+                var heroTop = hero.TranslatePoint(new Point(), window.ParseView).Y;
+                window.SetProbeBusy(true);
+                Check(window.ParseLoading.Visibility == Visibility.Visible, "Loading skeleton is visible during analysis");
                 await Task.Delay(170);
-                var skeleton = Field<FrameworkElement>("ParseLoading");
+                var skeleton = window.ParseLoading;
                 var block = Descendants(skeleton).OfType<Control>().First(c => c.Style == window.Resources["SkeletonBlock"]);
                 var sweep = (TranslateTransform)block.Template.FindName("Sweep", block);
                 var position = sweep.X;
                 await Task.Delay(190);
                 Check(!SystemParameters.ClientAreaAnimation || Math.Abs(sweep.X - position) > .05, "Visible skeleton shimmer advances over time");
                 await Task.Delay(100);
-                Check(hero.TranslatePoint(new Point(), Field<FrameworkElement>("ParseView")).Y < heroTop - 40, "First analysis moves the centered hero to the top");
-                var spinner = Field<FrameworkElement>("ProbeSpinner");
-                var rotation = Field<RotateTransform>("ProbeSpinnerRotate");
+                Check(hero.TranslatePoint(new Point(), window.ParseView).Y < heroTop - 40, "First analysis moves the centered hero to the top");
+                var spinner = window.ProbeSpinner;
+                var rotation = window.ProbeSpinnerRotate;
                 var angle = rotation.Angle;
-                await Task.Delay(100);
-                Check(spinner.IsVisible && (!SystemParameters.ClientAreaAnimation || Math.Abs(rotation.Angle - angle) > 10), "Analysis displays a rotating vector loader");
-                Call("SetProbeBusy", false);
+                var rotates = !SystemParameters.ClientAreaAnimation || await UiTiming.Until(() =>
+                    spinner.IsVisible && Math.Abs(Math.IEEERemainder(rotation.Angle - angle, 360)) > 10);
+                Check(spinner.IsVisible && rotates, "Analysis displays a rotating vector loader");
+                var beforeRecheck = rotation.Angle;
+                window.SetProbeBusy(true);
+                Check(!SystemParameters.ClientAreaAnimation || Math.Abs(rotation.Angle - beforeRecheck) < .01,
+                    "重复解析状态更新保留加载器旋转进度");
+                window.SetProbeBusy(false);
                 Check(!spinner.IsVisible, "Analysis completion hides the loader");
                 Check(ReferenceEquals(content, button.Content) && content is Panel, "Analysis preserves the vector button content");
-                Check(Field<FrameworkElement>("ParseLoading").Visibility == Visibility.Collapsed, "Loading skeleton disappears after analysis");
+                Check(window.ParseLoading.Visibility == Visibility.Collapsed, "Loading skeleton disappears after analysis");
                 Check(window.WindowStyle != WindowStyle.None, "Native caption styles remain available to DWM");
                 urlBox.Text = "https://www.bilibili.com/video/BV1tFZZBQE57";
                 var selectedFormat = new FormatInfo { FormatId = "raw-format-id", Label = "4K / 2160p", Height = 2160,
@@ -352,44 +383,41 @@ internal static class Program
                     window.ProbeFormats.Add(new FormatInfo { FormatId = "other-format-" + height,
                         Label = height == 2160 ? "4K / 2160p" : $"{height}p", Height = height,
                         Fps = 30, VideoCodec = "avc1", DynamicRange = "SDR", FileSize = 524288 });
-                var probeType = typeof(MainWindow).Assembly.GetType("Jiying.Desktop.ProbeResult")!;
-                typeof(MainWindow).GetField("_probe", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window,
-                    System.Text.Json.JsonSerializer.Deserialize("""{"engine":"ytdlp","title":"B 站 4K 视频预览"}""", probeType));
-                Field<FrameworkElement>("ProbePanel").Visibility = Visibility.Visible;
-                Field<TextBlock>("ProbeTitle").Text = "B 站 4K 视频预览";
-                Field<TextBlock>("ProbeMeta").Text = "视频已解析 · 4K / 2160p";
-                Field<TextBlock>("ProbeQualityHint").Text = "已读取到 4K 画质。登录来源变更后可刷新画质。";
-                Field<TextBlock>("ProbeQualityHint").Visibility = Visibility.Visible;
-                Field<TextBlock>("ParseAuthHint").Text = "扫码连接后自动刷新画质。4K 取决于视频与账号权限。";
-                Call("SetProbeBusy", false);
-                Field<ComboBox>("FormatList").SelectedIndex = 0;
+                window.ProbeResult = new ProbeResult { Engine = "ytdlp", Title = "B 站 4K 视频预览" };
+                window.ProbePanel.Visibility = Visibility.Visible;
+                window.ProbeTitle.Text = "B 站 4K 视频预览";
+                window.ProbeMeta.Text = "视频已解析 · 4K / 2160p";
+                window.ProbeQualityHint.Text = "已读取到 4K 画质。登录来源变更后可刷新画质。";
+                window.ProbeQualityHint.Visibility = Visibility.Visible;
+                window.ParseAuthHint.Text = "扫码连接后自动刷新画质。4K 取决于视频与账号权限。";
+                window.SetProbeBusy(false);
+                window.FormatList.SelectedIndex = 0;
                 subtitleMode.SelectedValue = "translate";
                 await Task.Delay(270);
-                Check(Field<TextBlock>("SubmitHint").Text.Contains(selectedFormat.Label), "下载摘要明确显示所选画质");
-                var previewBody = Field<StackPanel>("ProbePreviewBody");
-                var formatList = Field<ComboBox>("FormatList");
-                var submitButton = Field<Button>("SubmitButton");
+                Check(window.SubmitHint.Text.Contains(selectedFormat.Label), "下载摘要明确显示所选画质");
+                var previewBody = window.ProbePreviewBody;
+                var formatList = window.FormatList;
+                var submitButton = window.SubmitButton;
                 Check(previewBody.Children.IndexOf(formatList) >= 0 &&
-                      previewBody.Children.IndexOf(Field<Grid>("SubmitActions")) == previewBody.Children.IndexOf(formatList) + 1,
+                      previewBody.Children.IndexOf(window.SubmitActions) == previewBody.Children.IndexOf(formatList) + 1,
                       "开始下载按钮紧邻解析预览中的画质列表");
                 Check(formatList.Height == 40 && formatList.MaxDropDownHeight >= 400, "紧凑画质选择将选项展开到浮层，不挤占下载按钮");
-                Check(Math.Abs(Field<TextBlock>("ParseHeading").FontSize - 24) < .1 &&
-                      Field<FrameworkElement>("ParseHeading").Visibility == Visibility.Collapsed &&
-                      Field<FrameworkElement>("ParseDescription").Visibility == Visibility.Collapsed &&
-                      Field<FrameworkElement>("ParseExamples").Visibility == Visibility.Collapsed,
+                Check(Math.Abs(window.ParseHeading.FontSize - 24) < .1 &&
+                      window.ParseHeading.Visibility == Visibility.Collapsed &&
+                      window.ParseDescription.Visibility == Visibility.Collapsed &&
+                      window.ParseExamples.Visibility == Visibility.Collapsed,
                       "解析完成后隐藏页首标题、介绍和示例，为画质与下载保留空间");
-                var screenshotUi = typeof(MainWindow).GetField("_ui", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-                var screenshotTheme = screenshotUi.GetType().GetProperty("Theme")!;
-                var originalTheme = screenshotTheme.GetValue(screenshotUi);
+                var screenshotUi = window.Settings;
+                var originalTheme = screenshotUi.Theme;
                 window.Width = 1160;
                 window.Height = 720;
-                var desktopScroller = Field<ScrollViewer>("ParseScroller");
+                var desktopScroller = window.ParseScroller;
                 desktopScroller.ScrollToTop();
                 window.UpdateLayout();
                 var desktopSubmitPosition = submitButton.TranslatePoint(new Point(), desktopScroller);
                 Console.WriteLine($"DESKTOP CTA y={desktopSubmitPosition.Y:0.#}, height={submitButton.ActualHeight:0.#}, viewport={desktopScroller.ActualHeight:0.#}, scroll={desktopScroller.VerticalOffset:0.#}");
-                Check(Math.Abs(Field<FrameworkElement>("ProbePreviewThumb").Width - 264) < .1 &&
-                      Math.Abs(Field<FrameworkElement>("ProbePreviewThumb").Height - 148) < .1,
+                Check(Math.Abs(window.ProbePreviewThumb.Width - 264) < .1 &&
+                      Math.Abs(window.ProbePreviewThumb.Height - 148) < .1,
                       "桌面预览保留 264×148 缩略图");
                 Check(Math.Abs(desktopScroller.VerticalOffset) < .1 && desktopSubmitPosition.Y >= 0 &&
                       desktopSubmitPosition.Y + submitButton.ActualHeight <= desktopScroller.ActualHeight + 1,
@@ -400,27 +428,29 @@ internal static class Program
                       TextSearch.GetTextPath(formatList) == "Label", "大量画质不增加页面高度，支持输入画质名称直接定位");
                 foreach (var screenshotMode in new[] { "dark", "light" })
                 {
-                    screenshotTheme.SetValue(screenshotUi, screenshotMode);
-                    Call("ApplyAppearance");
+                    screenshotUi.Theme = screenshotMode;
+                    window.ApplyAppearance();
                     window.UpdateLayout();
                     await Task.Delay(120);
                     Capture("JIYING_PARSE_" + screenshotMode.ToUpperInvariant() + "_SCREENSHOT");
                 }
-                screenshotTheme.SetValue(screenshotUi, originalTheme);
-                Call("ApplyAppearance");
+                screenshotUi.Theme = originalTheme;
+                window.ApplyAppearance();
                 window.Width = 860;
                 window.Height = 560;
                 window.UpdateLayout();
-                var thumbBounds = Field<FrameworkElement>("NavThumb").TranslatePoint(new Point(), Field<FrameworkElement>("NavHost"));
+                var thumbBounds = window.NavThumb.TranslatePoint(new Point(), window.NavHost);
                 Check(Math.Abs(thumbBounds.X) < 1, "Compact navigation indicator aligns with the selected first item");
-                Check(Grid.GetRow(Field<FrameworkElement>("SkeletonLines")) == 1, "Compact loading skeleton stacks below its thumbnail");
+                Check(Grid.GetRow(window.SkeletonLines) == 1, "Compact loading skeleton stacks below its thumbnail");
                 Check(Grid.GetRow(previewBody) == 0 && Grid.GetColumn(previewBody) == 1 &&
-                      Math.Abs(Field<ColumnDefinition>("ProbeThumbColumn").Width.Value - 140) < .1 &&
-                      Math.Abs(Field<FrameworkElement>("ProbePreviewThumb").Width - 120) < .1 &&
-                      Math.Abs(Field<FrameworkElement>("ProbePreviewThumb").Height - 67.5) < .1,
+                      Math.Abs(window.ProbeThumbColumn.Width.Value - 140) < .1 &&
+                      Math.Abs(window.ProbePreviewThumb.Width - 120) < .1 &&
+                      Math.Abs(window.ProbePreviewThumb.Height - 67.5) < .1,
                       "紧凑预览使用左侧小缩略图和右侧画质，避免大图挤出下载按钮");
-                Check(Math.Abs(Field<FrameworkElement>("ProbePanel").Margin.Top - 30) < .1, "Preview keeps the original 30-pixel top spacing");
-                Check(Math.Abs(Field<FrameworkElement>("DirectoryDialog").Width - 560) < .1 && Field<FrameworkElement>("SubtitleDialog").Width > 640 && Field<FrameworkElement>("SubtitleDialog").Width <= 940 && Math.Abs(Field<FrameworkElement>("DeleteDialog").Width - 520) < .1, "字幕对照窗口扩宽，并保持目录与删除窗口尺寸");
+                Check(Math.Abs(window.ProbePanel.Margin.Top - 30) < .1, "Preview keeps the original 30-pixel top spacing");
+                Check(window.SubtitleDialog.Width > 640 && window.SubtitleDialog.Width <= 940 && Math.Abs(window.DeleteDialog.Width - 520) < .1, "字幕对照窗口扩宽，并保持删除窗口尺寸");
+                Check(MainWindow.OutputPickerStart(Path.Combine(Path.GetDirectoryName(settingsPath)!, "not-created", "nested")) ==
+                      Path.GetDirectoryName(settingsPath), "原生文件夹选择器从最近存在的输出目录打开");
                 formatList.IsDropDownOpen = true;
                 window.UpdateLayout();
                 await Task.Delay(80);
@@ -431,15 +461,15 @@ internal static class Program
                       !formatText.Contains("raw-format-id") && !formatText.Contains("https"),
                       "画质列表显示 4K、帧率和 HDR，隐藏原始格式标识与协议");
                 formatList.IsDropDownOpen = false;
-                var thumbnailClip = Field<Border>("ProbePreviewThumb").Clip as RectangleGeometry;
-                Check(Field<Image>("ProbeThumbnail") is not null && thumbnailClip is not null && Math.Abs(thumbnailClip.RadiusX - 12) < .1, "Parsed thumbnail image is clipped to a true rounded rectangle");
+                var thumbnailClip = window.ProbePreviewThumb.Clip as RectangleGeometry;
+                Check(window.ProbeThumbnail is not null && thumbnailClip is not null && Math.Abs(thumbnailClip.RadiusX - 12) < .1, "Parsed thumbnail image is clipped to a true rounded rectangle");
                 submitButton.BringIntoView();
                 await Task.Delay(100);
                 window.UpdateLayout();
                 Capture("JIYING_PARSE_COMPACT_SCREENSHOT");
                 window.Width = 1160;
                 window.Height = 720;
-                Field<ScrollViewer>("ParseScroller").ScrollToBottom();
+                window.ParseScroller.ScrollToBottom();
                 window.UpdateLayout();
                 await Task.Delay(100);
                 Capture("JIYING_PARSE_SUBTITLE_SCREENSHOT");
@@ -448,81 +478,89 @@ internal static class Program
                 subtitleAdvanced.IsExpanded = true;
                 window.UpdateLayout();
                 Check(subtitleMode.SelectedValue?.ToString() == "translate" &&
-                      Field<ComboBox>("WhisperParseBox").SelectedValue?.ToString() == "small",
+                      window.WhisperParseBox.SelectedValue?.ToString() == "small",
                       "Opening advanced settings preserves the subtitle mode and model");
                 foreach (var name in new[] { "LlmBaseParseBox", "LlmModelParseBox", "AsrBaseParseBox", "AsrModelParseBox" })
                 {
                     var control = Field<FrameworkElement>(name);
-                    var host = Field<FrameworkElement>("ParseLayout");
+                    var host = window.ParseLayout;
                     var left = control.TranslatePoint(new Point(), host).X;
                     Check(control.ActualWidth > 0 && left >= 0 && left + control.ActualWidth <= host.ActualWidth + 1,
                           name + " fits when advanced settings are expanded at the minimum width");
                 }
                 subtitleAdvanced.IsExpanded = false;
-                var parseScroller = Field<ScrollViewer>("ParseScroller");
+                var parseScroller = window.ParseScroller;
                 submitButton.BringIntoView();
                 window.UpdateLayout();
                 await Task.Delay(80);
-                var submitPosition = Field<FrameworkElement>("SubmitButton").TranslatePoint(new Point(), parseScroller);
-                Check(submitPosition.Y >= 0 && submitPosition.Y + Field<FrameworkElement>("SubmitButton").ActualHeight <= parseScroller.ActualHeight + 1,
+                var submitPosition = window.SubmitButton.TranslatePoint(new Point(), parseScroller);
+                Check(submitPosition.Y >= 0 && submitPosition.Y + window.SubmitButton.ActualHeight <= parseScroller.ActualHeight + 1,
                       "The task submit button remains reachable in the minimum window size");
-                var toastHost = Field<StackPanel>("ToastHost");
-                Call("ShowToast", "任务已创建", "测试提示一");
+                var toastHost = window.ToastHost;
+                window.ShowToast("任务已创建", "测试提示一");
                 var firstToast = toastHost.Children[^1];
-                Call("ShowToast", "检查失败", "测试提示二");
+                window.ShowToast("检查失败", "测试提示二");
                 Check(toastHost.Children.Contains(firstToast) &&
                       !ReferenceEquals(firstToast, toastHost.Children[^1]),
                       "Original toast overlay stacks concurrent messages");
                 toastHost.Children.Clear();
-                ((CancellationTokenSource)typeof(MainWindow).GetField("_stop", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!).Cancel();
-                var engine = typeof(MainWindow).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-                var enginePort = engine.GetType().GetProperty("Port")!;
-                enginePort.SetValue(engine, 1);
+                using (var child = new CancellationTokenSource())
+                {
+                    child.Cancel();
+                    await window.RunWindowOperationAsync("隔离子操作", () => Task.FromCanceled(child.Token), child.Token);
+                    Check(toastHost.Children.Count == 0, "预期的子操作取消不产生错误提示");
+                    await window.RunWindowOperationAsync("隔离子操作超时", () => Task.FromException(
+                        new TaskCanceledException("隔离超时", new TimeoutException(), child.Token)), child.Token);
+                    Check(toastHost.Children.Count == 1, "底层超时仍显示错误提示");
+                }
+                toastHost.Children.Clear();
+                window.WindowLifetime.Cancel();
+                var engine = window.Engine;
+                engine.Port = 1;
                 var previousFailures = failures.Count;
-                await (Task)typeof(MainWindow).GetMethod("SaveEngineConfigAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [false])!;
-                Field<TextBox>("UrlBox").Text = "https://example.com/video";
-                Call("Probe_Click", Field<Button>("ProbeButton"), new RoutedEventArgs());
-                Call("DownloadWhisper_Click", Field<Button>("DownloadWhisperButton"), new RoutedEventArgs());
+                await window.SaveEngineConfigAsync(false);
+                window.UrlBox.Text = "https://example.com/video";
+                window.Probe_Click(window.ProbeButton, new RoutedEventArgs());
+                window.DownloadWhisper_Click(window.DownloadWhisperButton, new RoutedEventArgs());
                 await Task.Delay(80);
-                enginePort.SetValue(engine, null);
+                engine.Port = null;
                 Check(failures.Count == previousFailures && toastHost.Children.Count == 0,
                       "Closing cancellation does not escape async void handlers or config lock acquisition");
                 window.QueueTasks.Clear();
                 window.QueueTasks.Add(new TaskItem { Id = "ui-check", Title = "UI check", Status = "running", Progress = new TaskProgress { Fraction = .5 } });
-                Field<ListView>("QueueList").Visibility = Visibility.Visible;
-                Field<FrameworkElement>("QueueEmpty").Visibility = Visibility.Collapsed;
-                Call("ShowView", "queue");
+                window.QueueList.Visibility = Visibility.Visible;
+                window.QueueEmpty.Visibility = Visibility.Collapsed;
+                window.ShowView("queue");
                 await Task.Delay(550);
                 window.UpdateLayout();
-                Check(Field<ListView>("QueueList").ItemContainerGenerator.ContainerFromIndex(0) is ListViewItem, "Task card renders read-only progress without a two-way binding crash");
-                var card = Field<ListView>("QueueList").ItemContainerGenerator.ContainerFromIndex(0);
+                Check(window.QueueList.ItemContainerGenerator.ContainerFromIndex(0) is ListViewItem, "Task card renders read-only progress without a two-way binding crash");
+                var card = window.QueueList.ItemContainerGenerator.ContainerFromIndex(0);
                 var originalTask = window.QueueTasks[0];
                 var stageStrip = Descendants((DependencyObject)card!).OfType<ItemsControl>()
                     .First(c => c.ItemsSource is List<StageView>);
                 var firstStage = stageStrip.ItemContainerGenerator.ContainerFromIndex(0);
-                typeof(MainWindow).GetMethod("SyncTasks", BindingFlags.Static | BindingFlags.NonPublic)!
-                    .Invoke(null, [window.QueueTasks, new[] { new TaskItem { Id = "ui-check", Title = "UI check", Status = "running", Progress = new TaskProgress { Fraction = .75 } } }]);
+                TaskListViewModel.SyncTasks(window.QueueTasks, new[] { new TaskItem { Id = "ui-check", Title = "UI check", Status = "running", Progress = new TaskProgress { Fraction = .75 } } });
                 window.UpdateLayout();
                 Check(ReferenceEquals(originalTask, window.QueueTasks[0]) &&
-                      ReferenceEquals(card, Field<ListView>("QueueList").ItemContainerGenerator.ContainerFromIndex(0)) &&
+                      ReferenceEquals(card, window.QueueList.ItemContainerGenerator.ContainerFromIndex(0)) &&
                       Math.Abs(window.QueueTasks[0].ProgressValue - 75) < .1,
                       "Queue polling preserves the existing task card");
                 Check(firstStage is not null && ReferenceEquals(firstStage, stageStrip.ItemContainerGenerator.ContainerFromIndex(0)),
                       "Progress refresh preserves existing stage visuals");
                 var notifications = new List<string?>();
                 originalTask.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
-                typeof(MainWindow).GetMethod("SyncTasks", BindingFlags.Static | BindingFlags.NonPublic)!
-                    .Invoke(null, [window.QueueTasks, new[] { new TaskItem { Id = "ui-check", Title = "UI check", Status = "running", Progress = new TaskProgress { Fraction = .75 } } }]);
+                TaskListViewModel.SyncTasks(window.QueueTasks, new[] { new TaskItem { Id = "ui-check", Title = "UI check", Status = "running", Progress = new TaskProgress { Fraction = .75 } } });
                 Check(notifications.Count == 0, "Unchanged task polling avoids binding refreshes");
-                typeof(MainWindow).GetMethod("SyncTasks", BindingFlags.Static | BindingFlags.NonPublic)!
-                    .Invoke(null, [window.QueueTasks, new[] { new TaskItem { Id = "ui-check", Title = "UI check", Status = "running", Progress = new TaskProgress { Fraction = .80 } } }]);
+                TaskListViewModel.SyncTasks(window.QueueTasks, new[] { new TaskItem { Id = "ui-check", Title = "UI check", Status = "running", Progress = new TaskProgress { Fraction = .80 } } });
                 Check(notifications.Contains(nameof(TaskItem.ProgressValue)) && !notifications.Contains("") &&
                       !notifications.Contains(nameof(TaskItem.StageViews)) && Math.Abs(originalTask.ProgressValue - 80) < .1,
                       "Progress changes update only progress bindings");
-                var fresh = new TaskItem { Status = "completed", Error = "" };
-                typeof(MainWindow).GetMethod("CopyTaskDetail", BindingFlags.Static | BindingFlags.NonPublic)!
-                    .Invoke(null, [fresh, new TaskItem { Status = "completed", Error = "old failure" }]);
-                Check(fresh.Error == "", "Cached details cannot restore an error cleared by retry");
+                var progress = Descendants((DependencyObject)card!).OfType<TaskProgressBar>().Single();
+                var fill = (Border)progress.Template.FindName("ProgressFill", progress);
+                var scale = (ScaleTransform)fill.RenderTransform;
+                Check(Math.Abs(progress.Value - 80) < .1, "Accessible progress reports the current value immediately");
+                await Task.Delay(200);
+                Check(Math.Abs(scale.ScaleX - .8) < .01, "Progress settles at the latest value");
                 window.Width = 1160;
                 window.Height = 720;
                 window.UpdateLayout();
@@ -552,64 +590,65 @@ internal static class Program
                 foreach (var name in new[] { "LlmBaseParseBox", "LlmModelParseBox", "AsrBaseParseBox", "AsrModelParseBox" })
                 {
                     var control = Field<FrameworkElement>(name);
-                    var host = Field<FrameworkElement>("ParseLayout");
+                    var host = window.ParseLayout;
                     var left = control.TranslatePoint(new Point(), host).X;
                     Check(left >= 0 && left + control.ActualWidth <= host.ActualWidth + 1, name + " fits the minimum window width");
                 }
-                Call("ShowView", "settings");
+                window.ShowView("settings");
                 await Task.Delay(550);
-                var scroller = Field<ScrollViewer>("SettingsScroller");
+                var scroller = window.SettingsScroller;
                 var scrollBar = (ScrollBar)scroller.Template.FindName("PART_VerticalScrollBar", scroller);
                 Check(Math.Abs(scrollBar.ActualWidth - 10) < .1, "Scrollbar keeps the original 10-pixel layout width");
                 scroller.ScrollToBottom();
                 window.UpdateLayout();
                 Check(scroller.VerticalOffset > 0 && Math.Abs(scroller.VerticalOffset - scroller.ScrollableHeight) < 1, "Settings can scroll to the last controls");
-                var ui = typeof(MainWindow).GetField("_ui", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-                var theme = ui.GetType().GetProperty("Theme")!;
-                var opacity = ui.GetType().GetProperty("BackgroundOpacity")!;
-                var oldTheme = theme.GetValue(ui);
-                var oldOpacity = opacity.GetValue(ui);
-                theme.SetValue(ui, "dark");
-                opacity.SetValue(ui, 40);
-                Call("ApplyAppearance");
+                var ui = window.Settings;
+                var oldTheme = ui.Theme;
+                var oldOpacity = ui.BackgroundOpacity;
+                ui.Theme = "dark";
+                ui.BackgroundOpacity = 40;
+                window.ApplyAppearance();
                 var softTint = ((SolidColorBrush)window.Resources["WindowBrush"]).Color.A;
                 Check(Math.Abs(window.Opacity - 1) < .001, "背景透明度不改变文字和控件整体透明度");
-                opacity.SetValue(ui, 100);
-                Call("ApplyAppearance");
+                ui.BackgroundOpacity = 100;
+                window.ApplyAppearance();
                 Check(((SolidColorBrush)window.Resources["WindowBrush"]).Color.A >= softTint, "浓度滑块控制背板层次");
-                Check(Field<Image>("BackgroundImage").Source is BitmapSource && window.FindName("GrainLayer") is not null, "恢复原来的背景纹理和磨砂颗粒");
+                Check(window.BackgroundImage.Source is BitmapSource && window.FindName("GrainLayer") is not null, "恢复原来的背景纹理和磨砂颗粒");
                 Check(((SolidColorBrush)window.Resources["WindowBrush"]).Color.R == 13 && ((SolidColorBrush)window.Resources["WindowBrush"]).Color.G == 17, "深色背板恢复原版色调");
                 Check(((SolidColorBrush)window.Resources["WindowBrush"]).Color.A > 0, "Dark shell prevents desktop colors bleeding through");
-                var settingsInput = Field<TextBox>("LlmBaseSettingsBox");
+                var settingsInput = window.LlmBaseSettingsBox;
                 Check(Math.Abs(settingsInput.Height - 34) < .001 && settingsInput.VerticalAlignment == VerticalAlignment.Center, "Text inputs share the 34-pixel control baseline");
-                Call("UpdateWindowClip");
-                Check(Field<Grid>("RootGrid").Clip is RectangleGeometry { RadiusX: 12, RadiusY: 12 }, "Restored window clips content to rounded corners");
-                theme.SetValue(ui, "light");
-                Call("ApplyThemeWithTransition");
-                Check(Field<Image>("ThemeTransitionLayer").Source is BitmapSource && Field<Image>("ThemeTransitionLayer").Visibility == Visibility.Visible, "Theme switch starts from a captured full-window frame");
-                await Task.Delay(300);
-                Check(Field<Image>("ThemeTransitionLayer").Visibility == Visibility.Collapsed, "Theme crossfade clears its snapshot after the transition");
+                window.UpdateWindowClip();
+                Check(window.RootGrid.Clip is RectangleGeometry { RadiusX: 12, RadiusY: 12 }, "Restored window clips content to rounded corners");
+                ui.Theme = "light";
+                window.ApplyThemeWithTransition();
+                Check(!SystemParameters.ClientAreaAnimation || window.ThemeTransitionLayer.Source is BitmapSource
+                    && window.ThemeTransitionLayer.Visibility == Visibility.Visible, "Theme switch starts from a captured full-window frame");
+                Check(await UiTiming.Until(() => window.ThemeTransitionLayer.Visibility == Visibility.Collapsed
+                    && window.ThemeTransitionLayer.Source is null && !window.ThemeTransitionLayer.HasAnimatedProperties),
+                    "Theme crossfade clears its snapshot after the transition");
                 Check(((SolidColorBrush)window.Resources["WindowBrush"]).Color.R == 252 && ((SolidColorBrush)window.Resources["TextBrush"]).Color.R == 48, "浅色背板和文字恢复原版色调");
-                var defaultOutput = (string)ui.GetType().GetProperty("DefaultOutputDirectory", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+                var defaultOutput = UiSettings.DefaultOutputDirectory;
                 Check(defaultOutput == defaultPath, "Default download directory stays portable");
-                theme.SetValue(ui, oldTheme);
-                opacity.SetValue(ui, oldOpacity);
-                Call("ApplyAppearance");
+                ui.Theme = oldTheme;
+                ui.BackgroundOpacity = oldOpacity;
+                window.ApplyAppearance();
+                await ScrollRegression.Run(window, Check);
                 var doneScreenshot = Environment.GetEnvironmentVariable("JIYING_DONE_SCREENSHOT");
                 if (!string.IsNullOrWhiteSpace(doneScreenshot))
                 {
                     window.Width = 1160;
                     window.Height = 720;
                     window.DoneTasks.Add(new TaskItem { Id = "done-check", Title = "示例视频", Status = "completed", CreatedAt = "2026-09-24T20:18:00", OutputDirectory = @"D:\即影\Downloads" });
-                    Field<TextBlock>("QueueBadgeText").Text = "1";
-                    Field<TextBlock>("DoneBadgeText").Text = "1";
-                    Field<TextBlock>("DoneCountText").Text = "共 1 条记录";
-                    Field<ListView>("DoneList").Visibility = Visibility.Visible;
-                    Field<FrameworkElement>("DoneEmpty").Visibility = Visibility.Collapsed;
-                    Call("ShowView", "done");
+                    window.QueueBadgeText.Text = "1";
+                    window.DoneBadgeText.Text = "1";
+                    window.DoneCountText.Text = "共 1 条记录";
+                    window.DoneList.Visibility = Visibility.Visible;
+                    window.DoneEmpty.Visibility = Visibility.Collapsed;
+                    window.ShowView("done");
                     await Task.Delay(320);
                     window.UpdateLayout();
-                    var doneItem = Field<ListView>("DoneList").ItemContainerGenerator.ContainerFromIndex(0) as ListViewItem;
+                    var doneItem = window.DoneList.ItemContainerGenerator.ContainerFromItem(window.DoneTasks[0]) as ListViewItem;
                     Check(doneItem?.Template.LoadContent() is ContentPresenter, "Completed card has no square hover chrome behind rounded edges");
                     var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                     bitmap.Render(window);
@@ -623,7 +662,7 @@ internal static class Program
             finally
             {
                 // 回归清理仅抛弃隔离编辑对象，失败时不等待未保存字幕的人工确认。
-                typeof(MainWindow).GetField("_editingArtifact", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, null);
+                window.EditingSubtitle = null;
                 window.Close();
                 if (originalSettings is null)
                 {
@@ -639,15 +678,9 @@ internal static class Program
         foreach (var failure in failures) Console.Error.WriteLine("FAIL " + failure);
         return failures.Count == 0 ? 0 : 1;
 
-        T Field<T>(string name) => (T)(typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(window)
-            ?? throw new Exception("Missing field: " + name));
-        void Call(string name, params object[] args) => (typeof(MainWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new Exception("Missing method: " + name)).Invoke(window, args);
-        void SetStatus(string typeName, string method, string json)
-        {
-            var type = typeof(MainWindow).Assembly.GetType("Jiying.Desktop." + typeName)!;
-            Call(method, System.Text.Json.JsonSerializer.Deserialize(json, type)!);
-        }
+        T Field<T>(string name) => (T)window.FindName(name);
+        void SetGpuStatus(string json) => window.ApplyGpuStatus(System.Text.Json.JsonSerializer.Deserialize<GpuStatus>(json)!);
+        void SetWhisperStatus(string json) => window.ApplyWhisperStatus(System.Text.Json.JsonSerializer.Deserialize<WhisperStatus>(json)!);
         void Capture(string variable)
         {
             var path = Environment.GetEnvironmentVariable(variable);
@@ -662,6 +695,7 @@ internal static class Program
         }
         async Task CheckSubtitleEntry()
         {
+            SubtitleOutputRegression.CheckPreviewDragGeometry(window, Check);
             var ordinary = new ArtifactItem { Id = 101, Kind = "subtitle", Language = "en", Path = "video.en.srt", TaskId = "edit-test" };
             var bilingual = new ArtifactItem { Id = 102, Kind = "bilingual", Language = "zh+en", Path = "video.zh+en.srt", TaskId = "edit-test" };
             Check(ordinary.IsSubtitle && bilingual.IsSubtitle, "单语与双语字幕均可编辑");
@@ -671,13 +705,13 @@ internal static class Program
                 Id = "edit-test", Title = "下载完成后修正字幕", Status = "completed", SubtitleMode = "burn",
                 Artifacts = [ordinary, bilingual, new ArtifactItem { Id = 103, Kind = "subtitle_backup", Path = "backup.srt" }]
             });
-            Field<FrameworkElement>("DoneEmpty").Visibility = Visibility.Collapsed;
-            Field<FrameworkElement>("DoneList").Visibility = Visibility.Visible;
-            Field<TextBlock>("DoneCountText").Text = "共 1 条记录";
-            Call("ShowView", "done");
+            window.DoneEmpty.Visibility = Visibility.Collapsed;
+            window.DoneList.Visibility = Visibility.Visible;
+            window.DoneCountText.Text = "共 1 条记录";
+            window.ShowView("done");
             await Task.Delay(350);
             window.UpdateLayout();
-            var edits = Descendants(Field<ListView>("DoneList")).OfType<Button>()
+            var edits = Descendants(window.DoneList).OfType<Button>()
                 .Where(button => button.Tag is ArtifactItem && button.IsVisible).ToArray();
             Check(edits.Length == 2, "完成的下载显示两个字幕修改入口，隐藏备份文件");
             Check(edits.FirstOrDefault()?.Tag == bilingual, "双语字幕修改入口优先显示");
@@ -687,15 +721,13 @@ internal static class Program
             if (edits.Length > 0) await CheckSubtitleWorkflow(edits[0]);
             window.DoneTasks.Clear();
             window.QueueTasks.Clear();
-            Field<System.Collections.Concurrent.ConcurrentDictionary<string, TaskItem>>("_terminalDetails").TryRemove("edit-test", out _);
-            Field<System.Collections.Concurrent.ConcurrentDictionary<string, string>>("_knownStatuses").TryRemove("edit-test", out _);
-            Call("ShowView", "parse");
+            window.TaskList.Apply(new TaskSnapshot([], null), ["edit-test"], new HashSet<string>(), _ => { });
+            window.ShowView("parse");
             await Task.Delay(350);
         }
         async Task CheckSubtitleWorkflow(Button edit)
         {
-            var engine = typeof(MainWindow).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-            var port = engine.GetType().GetProperty("Port")!;
+            var engine = window.Engine;
             using var stop = new CancellationTokenSource();
             var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
@@ -710,24 +742,23 @@ internal static class Program
             var serverTask = Task.Run(ServeSubtitleRequests);
             try
             {
-                port.SetValue(engine, ((IPEndPoint)listener.LocalEndpoint).Port);
+                engine.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
                 edit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                await Until(() => Field<FrameworkElement>("SubtitleDialog").Visibility == Visibility.Visible);
-                var text = Field<TextBox>("SubtitleTextBox");
-                Check(text.Text == originalText && Field<TextBlock>("SubtitleDialogTitle").Text.Contains("双语"), "真实点击双语入口读取完整字幕");
+                await Until(() => window.SubtitleDialog.Visibility == Visibility.Visible);
+                var text = window.SubtitleTextBox;
+                Check(text.Text == originalText && window.SubtitleDialogTitle.Text.Contains("双语"), "真实点击双语入口读取完整字幕");
                 await Task.Delay(350);
                 window.UpdateLayout();
-                Check(Field<StackPanel>("ToastHost").Children.Count == 0, "正常打开字幕时没有错误提示");
+                Check(window.ToastHost.Children.Count == 0, "正常打开字幕时没有错误提示");
                 Capture("JIYING_SUBTITLE_EDITOR_SCREENSHOT");
                 var width = window.Width;
                 var height = window.Height;
-                var ui = typeof(MainWindow).GetField("_ui", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-                var theme = ui.GetType().GetProperty("Theme")!;
-                var originalTheme = theme.GetValue(ui);
+                var ui = window.Settings;
+                var originalTheme = ui.Theme;
                 foreach (var mode in new[] { "dark", "light" })
                 {
-                theme.SetValue(ui, mode);
-                Call("ApplyAppearance");
+                ui.Theme = mode;
+                window.ApplyAppearance();
                 foreach (var dimensions in new[] { (860d, 560d), (1200d, 820d) })
                 {
                     window.Width = dimensions.Item1;
@@ -735,7 +766,7 @@ internal static class Program
                     text.Text = string.Concat(Enumerable.Repeat(originalText, 100));
                     window.UpdateLayout();
                     await Task.Delay(100);
-                    var overlay = Field<FrameworkElement>("ModalOverlay");
+                    var overlay = window.ModalOverlay;
                     foreach (var name in new[] { "SubtitleRows", "SubtitleSaveButton", "SubtitleRenderButton", "SubtitleHint" })
                     {
                         var element = Field<FrameworkElement>(name);
@@ -746,46 +777,46 @@ internal static class Program
                     if (mode == "light" && dimensions.Item1 == 1200) Capture("JIYING_SUBTITLE_LIGHT_SCREENSHOT");
                 }
                 }
-                theme.SetValue(ui, originalTheme);
-                Call("ApplyAppearance");
+                ui.Theme = originalTheme;
+                window.ApplyAppearance();
                 window.Width = width;
                 window.Height = height;
-                var rows = Field<DataGrid>("SubtitleRows");
+                var rows = window.SubtitleRows;
                 Check(rows.Visibility == Visibility.Visible && text.Visibility == Visibility.Collapsed, "正常字幕使用逐条列表");
                 ((SubtitleCue)rows.Items[0]).Text = "识别正确\nCorrected";
                 Check(text.Text == corrected, "逐条文字修改同步保存稿并保留时间轴");
-                var save = Field<Button>("SubtitleSaveButton");
-                var render = Field<Button>("SubtitleRenderButton");
+                var save = window.SubtitleSaveButton;
+                var render = window.SubtitleRenderButton;
                 save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 await saveReached.Task.WaitAsync(TimeSpan.FromSeconds(3));
                 Check(!save.IsEnabled && !render.IsEnabled && text.IsReadOnly, "保存期间锁定输入和操作");
                 save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 releaseSave.TrySetResult();
-                await Until(() => !Field<bool>("_subtitleBusy"));
+                await Until(() => !window.SubtitleBusy);
                 Check(requests.Count(request => request.Method == "PUT") == 1 && text.Text == corrected, "重复保存只发出一次请求，并保留修改内容");
-                Check(Field<TextBlock>("SubtitleHint").Text.Contains("已保存") && render.IsEnabled, "保存后仍能继续修改和生成视频");
+                Check(window.SubtitleHint.Text.Contains("已保存") && render.IsEnabled, "保存后仍能继续修改和生成视频");
                 rejectSave = true;
                 render.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                await Until(() => !Field<bool>("_subtitleBusy"));
+                await Until(() => !window.SubtitleBusy);
                 Check(!requests.Any(request => request.Path.EndsWith("/rerender")) && text.Text == corrected &&
-                      Field<TextBlock>("SubtitleHint").Text.Contains("保存失败"), "字幕保存失败时阻止生成并保留修改");
+                      window.SubtitleHint.Text.Contains("保存失败"), "字幕保存失败时阻止生成并保留修改");
                 rejectSave = false;
                 rejectRender = true;
                 render.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                await Until(() => !Field<bool>("_subtitleBusy"));
-                Check(Field<TextBlock>("SubtitleHint").Text.Contains("未启动") && render.IsEnabled && text.Text == corrected, "视频生成提交失败后保留字幕并允许重试");
+                await Until(() => !window.SubtitleBusy);
+                Check(window.SubtitleHint.Text.Contains("未启动") && render.IsEnabled && text.Text == corrected, "视频生成提交失败后保留字幕并允许重试");
                 rejectRender = false;
-                Field<StackPanel>("ToastHost").Children.Clear();
+                window.ToastHost.Children.Clear();
                 render.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                await Until(() => Field<FrameworkElement>("ModalOverlay").Visibility == Visibility.Collapsed);
+                await Until(() => window.ModalOverlay.Visibility == Visibility.Collapsed);
                 var submitted = requests.Last(request => request.Path.EndsWith("/rerender"));
                 using var payload = System.Text.Json.JsonDocument.Parse(submitted.Body);
                 Check(payload.RootElement.GetProperty("artifact_id").GetInt32() == 102 &&
                       payload.RootElement.GetProperty("background").GetBoolean(), "生成请求准确指定已编辑双语字幕并在后台执行");
-                Check(Field<FrameworkElement>("QueueView").Visibility == Visibility.Visible, "提交后进入传输队列查看生成进度");
+                Check(window.QueueView.Visibility == Visibility.Visible, "提交后进入传输队列查看生成进度");
                 await Until(() => window.QueueTasks.Count == 1 && window.QueueTasks[0].Progress.Stage == "render");
                 Check(window.QueueTasks[0].Status == "running" &&
-                      !Descendants(Field<StackPanel>("ToastHost")).OfType<TextBlock>().Any(block => block.Text == "操作失败"), "生成任务刷新为进行中，进度读取没有错误");
+                      !Descendants(window.ToastHost).OfType<TextBlock>().Any(block => block.Text == "操作失败"), "生成任务刷新为进行中，进度读取没有错误");
                 Check(requests.Where(request => request.Method == "PUT").All(request =>
                       System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(request.Body)!["text"] == corrected), "所有保存请求均包含修正后的文字");
             }
@@ -795,8 +826,8 @@ internal static class Program
                 stop.Cancel();
                 listener.Stop();
                 await serverTask;
-                port.SetValue(engine, null);
-                Field<StackPanel>("ToastHost").Children.Clear();
+                engine.Port = null;
+                window.ToastHost.Children.Clear();
             }
 
             async Task Until(Func<bool> ready)
@@ -852,10 +883,10 @@ internal static class Program
                             progress = new { stage = renderAccepted ? "render" : "", fraction = .4 }
                         };
                         var status = "200 OK";
-                        var body = request[0] == "GET" && request[1].EndsWith("/content")
+                        var path = request[1].Split('?', 2)[0];
+                        var body = request[0] == "GET" && path.EndsWith("/content")
                             ? System.Text.Json.JsonSerializer.Serialize(new { text = originalText })
-                            : request[1] == "/api/v1/tasks" ? System.Text.Json.JsonSerializer.Serialize(new[] { fixture })
-                            : request[1] == "/api/v1/tasks/edit-test" ? System.Text.Json.JsonSerializer.Serialize(fixture)
+                            : path == "/api/v1/tasks" ? System.Text.Json.JsonSerializer.Serialize(new[] { fixture })
                             : "{\"ok\":true,\"status\":\"running\"}";
                         if (request[0] == "PUT")
                         {
@@ -912,23 +943,23 @@ internal static class Program
 
         void CheckPlatformLogin()
         {
-            var input = Field<TextBox>("UrlBox");
+            var input = window.UrlBox;
             var previous = input.Text;
             foreach (var pair in new[] { ("https://www.douyin.com/?recommend=1", "抖音"),
                          ("https://xhslink.com/o/sample", "小红书") })
             {
                 input.Text = pair.Item1;
                 window.UpdateLayout();
-                Check(Field<Border>("BilibiliLoginBar").Visibility == Visibility.Visible,
-                      pair.Item2 + "解析页提供官网连接入口");
+                Check(window.BilibiliLoginBar.Visibility == Visibility.Collapsed,
+                      pair.Item2 + "粘贴后隐藏非必要的账号区域");
                 Check(window.FindName("ConnectPlatformButton") is Button { Visibility: Visibility.Visible } button
                       && button.Content.ToString()!.Contains(pair.Item2), pair.Item2 + "连接按钮标明目标平台");
-                Check(Field<Button>("ConnectBilibiliButton").Visibility == Visibility.Collapsed, "其他平台不显示 B 站扫码");
+                Check(window.ConnectBilibiliButton.Visibility == Visibility.Collapsed, "其他平台不显示 B 站扫码");
             }
             input.Text = "https://www.bilibili.com/video/BV1MP4y1m7Ci";
-            Check(Field<Button>("ConnectBilibiliButton").Visibility == Visibility.Visible, "保留现有 B 站扫码入口");
+            Check(window.ConnectBilibiliButton.Visibility == Visibility.Visible, "保留现有 B 站扫码入口");
             input.Text = "https://douyin.com.example.test/video/123";
-            Check(Field<Border>("BilibiliLoginBar").Visibility == Visibility.Collapsed, "同名外站不显示平台连接入口");
+            Check(window.BilibiliLoginBar.Visibility == Visibility.Collapsed, "同名外站不显示平台连接入口");
             input.Text = previous;
             Check(PlatformConnectionWindow.SelectedVideoUrl("douyin", "https://www.douyin.com/?recommend=1", "") == "",
                   "推荐页必须由用户选择具体视频");
@@ -950,28 +981,24 @@ internal static class Program
 
         void CheckDefaultOutputPaths()
         {
-            var resolve = settingsType.GetMethod("ResolveDefaultOutputDirectory", BindingFlags.Static | BindingFlags.NonPublic);
-            var normalize = settingsType.GetMethod("NormalizeOutputDirectory", BindingFlags.Static | BindingFlags.NonPublic);
-            Check(resolve is not null && normalize is not null, "Default output policy can handle computers with and without D drive");
-            if (resolve is null || normalize is null) return;
             var videos = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "即影");
             var dPath = @"D:\即影\Downloads";
-            Check((string)resolve.Invoke(null, [true])! == dPath && (string)resolve.Invoke(null, [false])! == videos,
+            Check(UiSettings.ResolveDefaultOutputDirectory(true) == dPath && UiSettings.ResolveDefaultOutputDirectory(false) == videos,
                   "D drive is preferred and missing D drive falls back to user Videos");
-            Check((string)normalize.Invoke(null, ["", true])! == dPath && (string)normalize.Invoke(null, ["", false])! == videos,
+            Check(UiSettings.NormalizeOutputDirectory("", true) == dPath && UiSettings.NormalizeOutputDirectory("", false) == videos,
                   "Empty paths use the available drive default");
-            Check((string)normalize.Invoke(null, [videos, true])! == dPath,
+            Check(UiSettings.NormalizeOutputDirectory(videos, true) == dPath,
                   "The old automatic Videos default migrates to D drive");
-            Check((string)normalize.Invoke(null, [dPath, true])! == dPath && (string)normalize.Invoke(null, [dPath, false])! == videos,
+            Check(UiSettings.NormalizeOutputDirectory(dPath, true) == dPath && UiSettings.NormalizeOutputDirectory(dPath, false) == videos,
                   "Uncreated D download directory is retained and missing D drive falls back");
-            Check((string)normalize.Invoke(null, [@"C:\MyDownloads", true])! == @"C:\MyDownloads",
+            Check(UiSettings.NormalizeOutputDirectory(@"C:\MyDownloads", true) == @"C:\MyDownloads",
                   "Manually selected download directories are preserved");
         }
 
         async Task CheckSettingsUx()
         {
             CheckDefaultOutputPaths();
-            Call("ShowView", "settings");
+            window.ShowView("settings");
             await Task.Delay(320);
             window.UpdateLayout();
             foreach (var name in new[] { "SpeechSettings", "AdvancedSettings" })
@@ -982,9 +1009,9 @@ internal static class Program
                 Check(header is not null && header.ActualWidth >= group.ActualWidth - 4 && header.ActualHeight >= 44,
                       name + " has a full-width accessible disclosure header");
                 if (header is null) continue;
-                typeof(ToggleButton).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(header, null);
+                header.IsChecked = header.IsChecked != true;
                 Check(group.IsExpanded, name + " opens by clicking its header");
-                typeof(ToggleButton).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(header, null);
+                header.IsChecked = header.IsChecked != true;
                 Check(!group.IsExpanded, name + " closes by clicking its header");
                 Check(header.Focus() && header.IsKeyboardFocused, name + " supports keyboard focus");
                 var peer = new System.Windows.Automation.Peers.ToggleButtonAutomationPeer(header);
@@ -997,16 +1024,15 @@ internal static class Program
             Check(window.FindName("SpeechSettings") is Expander { IsExpanded: false }, "语音与翻译默认折叠");
             Check(window.FindName("GpuAdvancedSettings") is Expander { IsExpanded: false }, "可选 GPU 加速默认折叠");
             Check(window.FindName("SaveSettingsButton") is Button, "设置提供明确的保存和重试入口");
-            var engine = typeof(MainWindow).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-            var port = engine.GetType().GetProperty("Port")!;
-            var loading = typeof(MainWindow).GetField("_loadingControls", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            loading.SetValue(window, true);
-            Field<TextBox>("AsrBaseSettingsBox").Text = "https://saved.example/asr";
-            Field<PasswordBox>("AsrKeySettingsBox").Password = "test-key";
-            Field<ComboBox>("WhisperSettingsBox").SelectedValue = "base";
-            Call("SyncDependentControls", false);
-            Check(Field<TextBlock>("SpeechSettingsSummary").Text.Contains("base"), "折叠标题显示当前识别模型");
-            loading.SetValue(window, false);
+            var engine = window.Engine;
+
+            window.ControlsAreLoading = true;
+            window.AsrBaseSettingsBox.Text = "https://saved.example/asr";
+            window.AsrKeySettingsBox.Password = "test-key";
+            window.WhisperSettingsBox.SelectedValue = "base";
+            window.SyncDependentControls(false);
+            Check(window.SpeechSettingsSummary.Text.Contains("base"), "折叠标题显示当前识别模型");
+            window.ControlsAreLoading = false;
             foreach (var success in new[] { false, true })
             {
                 var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -1048,16 +1074,16 @@ internal static class Program
                 });
                 try
                 {
-                    port.SetValue(engine, ((IPEndPoint)listener.LocalEndpoint).Port);
-                    var save = (Task<bool>)typeof(MainWindow).GetMethod("SaveEngineConfigAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [false])!;
+                    engine.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                    var save = window.SaveEngineConfigAsync(false);
                     var payload = await reached.Task.WaitAsync(stop.Token);
-                    Check(Field<TextBlock>("SettingsSaveStatus").Text.Contains("正在保存"), "请求完成前显示正在保存");
+                    Check(window.SettingsSaveStatus.Text.Contains("正在保存"), "请求完成前显示正在保存");
                     Check(payload.Contains("saved.example/asr") && payload.Contains("test-key"), "折叠设置仍提交接口与凭证");
                     Check(!payload.Contains("\"cookies\"") && !payload.Contains("cookies_from_browser"), "普通设置保存不提交登录字段，保留扫码会话");
                     release.SetResult();
                     Check(await save == success, "保存返回服务端的实际结果");
-                    Check(success ? Field<TextBlock>("SettingsSaveStatus").Text.Contains("已保存") && Field<PasswordBox>("AsrKeySettingsBox").Password == "" :
-                        Field<TextBlock>("SettingsSaveStatus").Text.Contains("保存失败") && Field<PasswordBox>("AsrKeySettingsBox").Password == "test-key", "成功清空凭证输入，失败保留修改并提示重试");
+                    Check(success ? window.SettingsSaveStatus.Text.Contains("已保存") && window.AsrKeySettingsBox.Password == "" :
+                        window.SettingsSaveStatus.Text.Contains("保存失败") && window.AsrKeySettingsBox.Password == "test-key", "成功清空凭证输入，失败保留修改并提示重试");
                 }
                 finally
                 {
@@ -1065,17 +1091,16 @@ internal static class Program
                     stop.Cancel();
                     listener.Stop();
                     await server;
-                    port.SetValue(engine, null);
-                    Field<StackPanel>("ToastHost").Children.Clear();
+                    engine.Port = null;
+                    window.ToastHost.Children.Clear();
                 }
             }
         }
 
         async Task CheckLoginConfigRecovery()
         {
-            var engine = typeof(MainWindow).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-            var port = engine.GetType().GetProperty("Port")!;
-            var loginStop = typeof(MainWindow).GetField("_bilibiliLoginStop", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var engine = window.Engine;
+
             var image = new PngBitmapEncoder();
             image.Frames.Add(BitmapFrame.Create(BitmapSource.Create(1, 1, 96, 96, PixelFormats.Bgra32, null, new byte[] { 0, 0, 0, 255 }, 4)));
             using var png = new MemoryStream();
@@ -1092,19 +1117,19 @@ internal static class Program
                 var serverTask = Task.Run(ServeLoginConfig);
                 try
                 {
-                    port.SetValue(engine, ((IPEndPoint)listener.LocalEndpoint).Port);
-                    Field<TextBox>("UrlBox").Text = "https://www.bilibili.com/video/test-login-config";
-                    Call("ConnectBilibili_Click", Field<Button>("ConnectBilibiliButton"), new RoutedEventArgs());
+                    engine.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                    window.UrlBox.Text = "https://www.bilibili.com/video/test-login-config";
+                    window.ConnectBilibili_Click(window.ConnectBilibiliButton, new RoutedEventArgs());
                     await configReached.Task.WaitAsync(TimeSpan.FromSeconds(6));
                     if (cancelled)
                     {
-                        Call("ConnectBilibili_Click", Field<Button>("ConnectBilibiliButton"), new RoutedEventArgs());
+                        window.ConnectBilibili_Click(window.ConnectBilibiliButton, new RoutedEventArgs());
                         await Task.Delay(250);
-                        Check(loginStop.GetValue(window) is null && Field<Button>("ConnectBilibiliButton").Content?.ToString() == "连接 B 站",
+                        Check(window.BilibiliCancellation is null && window.ConnectBilibiliButton.Content?.ToString() == "连接 B 站",
                               "扫码成功后取消配置读取可立即恢复连接按钮");
                     }
                     releaseConfig.TrySetResult();
-                    for (var i = 0; i < 100 && loginStop.GetValue(window) is not null; i++) await Task.Delay(20);
+                    for (var i = 0; i < 100 && window.BilibiliCancellation is not null; i++) await Task.Delay(20);
                     Check(!requests.Any(request => request.Contains("/probe") || request == "POST /api/v1/config"),
                           cancelled ? "取消配置读取后不重探或写入旧配置" : "配置读取失败后不重探或写入旧配置");
                 }
@@ -1114,9 +1139,9 @@ internal static class Program
                     serverStop.Cancel();
                     listener.Stop();
                     await serverTask;
-                    port.SetValue(engine, null);
-                    Field<TextBox>("UrlBox").Text = "";
-                    Field<StackPanel>("ToastHost").Children.Clear();
+                    engine.Port = null;
+                    window.UrlBox.Text = "";
+                    window.ToastHost.Children.Clear();
                 }
 
                 async Task ServeLoginConfig()
@@ -1162,13 +1187,12 @@ internal static class Program
         }
         async Task CheckWhisperPreflight()
         {
-            var engine = typeof(MainWindow).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-            var port = engine.GetType().GetProperty("Port")!;
-            var loading = typeof(MainWindow).GetField("_loadingControls", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            var originalRecognize = Field<CheckBox>("RecognizeCheck").IsChecked;
-            var provider = Field<ComboBox>("AsrProviderParseBox");
+            var engine = window.Engine;
+
+            var originalRecognize = window.RecognizeCheck.IsChecked;
+            var provider = window.AsrProviderParseBox;
             var originalProvider = provider.SelectedValue;
-            loading.SetValue(window, true);
+            window.ControlsAreLoading = true;
             try
             {
                 foreach (var item in new[]
@@ -1181,13 +1205,13 @@ internal static class Program
                     (true, "faster-whisper", "downloaded", true, true)
                 })
                 {
-                    Field<CheckBox>("RecognizeCheck").IsChecked = item.Item1;
+                    window.RecognizeCheck.IsChecked = item.Item1;
                     provider.SelectedValue = item.Item2;
                     var requiresModel = item.Item1 && item.Item2 != "cloud";
                     var listener = new TcpListener(IPAddress.Loopback, 0);
                     listener.Start();
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
-                    port.SetValue(engine, ((IPEndPoint)listener.LocalEndpoint).Port);
+                    engine.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
                     var response = requiresModel ? Task.Run(async () =>
                     {
                         using var client = await listener.AcceptTcpClientAsync(timeout.Token);
@@ -1203,11 +1227,11 @@ internal static class Program
                     }) : Task.CompletedTask;
                     try
                     {
-                        var ready = await (Task<bool>)typeof(MainWindow).GetMethod("EnsureWhisperReadyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null)!;
+                        var ready = await window.EnsureWhisperReadyAsync();
                         await response;
                         Check(ready == item.Item5 && (requiresModel || !listener.Pending()), $"Whisper提交检查 {item.Item1}/{item.Item2}/{item.Item3}");
-                        if (!ready) Check(Field<FrameworkElement>("WhisperPrompt").Visibility == Visibility.Visible, "缺模型或正在下载时提供就地准备提醒");
-                        if (!item.Item4 && item.Item3 == "ready") Check(Field<Button>("PrepareWhisperButton").IsEnabled, "旧就绪状态不能屏蔽缺失模型的下载入口");
+                        if (!ready) Check(window.WhisperPrompt.Visibility == Visibility.Visible, "缺模型或正在下载时提供就地准备提醒");
+                        if (!item.Item4 && item.Item3 == "ready") Check(window.PrepareWhisperButton.IsEnabled, "旧就绪状态不能屏蔽缺失模型的下载入口");
                     }
                     finally { listener.Stop(); }
                 }
@@ -1215,34 +1239,33 @@ internal static class Program
                 duplicateListener.Start();
                 try
                 {
-                    port.SetValue(engine, ((IPEndPoint)duplicateListener.LocalEndpoint).Port);
-                    var probeType = typeof(MainWindow).Assembly.GetType("Jiying.Desktop.ProbeResult")!;
-                    typeof(MainWindow).GetField("_probe", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, Activator.CreateInstance(probeType));
+                    engine.Port = ((IPEndPoint)duplicateListener.LocalEndpoint).Port;
+                    window.ProbeResult = new ProbeResult();
                     window.ProbeFormats.Add(new FormatInfo());
-                    Field<ComboBox>("FormatList").SelectedIndex = 0;
-                    typeof(MainWindow).GetField("_submitting", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, true);
-                    Call("Submit_Click", Field<Button>("SubmitButton"), new RoutedEventArgs());
+                    window.FormatList.SelectedIndex = 0;
+                    window.Submitting = true;
+                    window.Submit_Click(window.SubmitButton, new RoutedEventArgs());
                     await Task.Delay(100);
                     Check(!duplicateListener.Pending(), "提交处理中再次触发开始不会发出第二个请求");
                 }
                 finally
                 {
                     duplicateListener.Stop();
-                    typeof(MainWindow).GetField("_submitting", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, false);
-                    typeof(MainWindow).GetField("_probe", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, null);
+                    window.Submitting = false;
+                    window.ProbeResult = null;
                     window.ProbeFormats.Clear();
                 }
             }
             finally
             {
-                port.SetValue(engine, null);
-                Field<CheckBox>("RecognizeCheck").IsChecked = originalRecognize;
+                engine.Port = null;
+                window.RecognizeCheck.IsChecked = originalRecognize;
                 provider.SelectedValue = originalProvider;
-                typeof(MainWindow).GetField("_whisperStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, null);
-                Field<FrameworkElement>("WhisperPrompt").Visibility = Visibility.Collapsed;
-                Field<StackPanel>("ToastHost").Children.Clear();
-                loading.SetValue(window, false);
-                Call("SyncWhisperPrompt");
+                window.WhisperComponentStatus = null;
+                window.WhisperPrompt.Visibility = Visibility.Collapsed;
+                window.ToastHost.Children.Clear();
+                window.ControlsAreLoading = false;
+                window.SyncWhisperPrompt();
             }
         }
         void Check(bool condition, string message) { Console.WriteLine((condition ? "PASS " : "FAIL ") + message); if (!condition) failures.Add(message); }

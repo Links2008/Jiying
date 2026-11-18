@@ -72,6 +72,40 @@ def test_seeded_name_memory_is_reused_without_extra_analysis_call(monkeypatch):
     assert sorted(calls) == [1, 2, 3, 4, 5]
 
 
+def test_person_mentions_export_names_and_only_dialogue_supported_descriptions(monkeypatch):
+    translator = worker(glossary={"zh": {"Sam Altman": "山姆·奥特曼"}})
+
+    def reply(prompt):
+        number, _ = row(prompt)
+        if number == 1:
+            return response(number, "嘉宾奥特曼发言。", "Sam Altman", "奥特曼", sense="嘉宾")
+        if number == 2:
+            return response(number, "奥特曼继续发言。", "Sam Altman", "奥特曼", sense="主管")
+        return response(number, "进入下一章。", "Next", "下一章", kind="proper", sense="标题")
+
+    monkeypatch.setattr(translator, "_call_api", reply)
+    translated = translator.translate(["Guest Sam Altman speaks.", "Sam Altman continues.", "Next chapter"], "en", "zh")
+    assert translator.person_mentions(translated, "zh") == [
+        {"source": "Sam Altman", "target": "山姆·奥特曼", "sense": "嘉宾", "id": 1, "kind": "person"},
+        {"source": "Sam Altman", "target": "山姆·奥特曼", "sense": "", "id": 2, "kind": "person"},
+    ]
+
+
+def test_cached_translation_can_extract_person_without_retranslating_and_use_nearby_role(tmp_path, monkeypatch):
+    translator = worker()
+    rows = ["Lucy Morgan leads the lab.", "Lucy Morgan answers."]
+    translated = ["露西·摩根负责实验室。", "露西·摩根回答。"]
+    terms = [{"source": "Lucy Morgan", "target": "露西·摩根", "sense": "实验室负责人",
+              "kind": "person", "ids": [2], "confidence": "high",
+              "evidence": [{"id": 1, "quote": "leads the lab"}]}]
+    recorded = []
+    monkeypatch.setattr(translator, "_call_api", lambda prompt:
+                        recorded.append(prompt) or json.dumps({"terms": terms}, ensure_ascii=False))
+    extracted = translator.backfill_person_mentions(rows, translated, tmp_path, lambda: None)
+    assert len(recorded) == 1 and "不重新翻译" in recorded[0]
+    assert extracted[0]["sense"] == "实验室负责人" and extracted[0]["id"] == 2
+
+
 def test_fixed_name_overrides_automatic_memory_before_next_prompt(monkeypatch):
     translator = worker(glossary={'zh': {'Sam Altman': '山姆·奥特曼'}})
     def reply(prompt):
@@ -194,8 +228,8 @@ def test_semantic_hints_api_roundtrip_omission_and_explicit_clear(tmp_path):
     assert client.post('/api/v1/config', json=values).status_code == 200
     fetched = client.get('/api/v1/config').json()
     assert all(fetched[key] == value for key, value in values.items())
-    assert server._config.get('transcriber.hotwords') == values['asr_hotwords']
-    assert server._config.get('translator.llm.domain_context') == values['llm_domain_context']
+    assert client.app.state.runtime.config.get('transcriber.hotwords') == values['asr_hotwords']
+    assert client.app.state.runtime.config.get('translator.llm.domain_context') == values['llm_domain_context']
     assert (tmp_path / 'config.yaml').is_file()
     client.post('/api/v1/config', json={'model': 'small'})
     assert client.get('/api/v1/config').json()['llm_terminology_notes'] == values['llm_terminology_notes']
@@ -214,7 +248,7 @@ def test_pipeline_passes_recording_title_to_translator(monkeypatch, tmp_path):
     task = runner.create_task('https://example.test/interview', 'best', ['zh'], 'softmux', title='AI访谈')
     titles = []
     fake = SimpleNamespace(set_context=titles.append, translate=lambda *a, **kw: ['译文'])
-    monkeypatch.setattr('app.pipeline.runner.build_translator', lambda *_: fake)
+    monkeypatch.setattr('app.pipeline.translation.build_translator', lambda *_: fake)
     runner._stage_translate(task, Transcript('en', [Segment(0, 1, 'hello')]), ['zh'])
     assert titles == ['AI访谈']
 

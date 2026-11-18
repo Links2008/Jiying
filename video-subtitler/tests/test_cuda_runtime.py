@@ -2,6 +2,7 @@
 import hashlib
 import json
 import lzma
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -9,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.cuda_runtime import ensure_cuda_runtime
+from app.services.cuda_runtime import _runtime_lock, ensure_cuda_runtime
 
 
 NAMES = ('cublas64_12.dll', 'cublasLt64_12.dll')
@@ -150,6 +151,32 @@ def test_concurrent_restore_produces_only_complete_files(tmp_path):
     assert len(set(results)) == 1
     assert {p.name: p.read_bytes() for p in results[0].glob('*.dll')} == payloads
     assert not list(cache.rglob('*.tmp'))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="需要 Windows 字节范围锁")
+def test_empty_lock_region_is_never_written_while_another_handle_owns_it(tmp_path):
+    import msvcrt
+
+    path = tmp_path / "empty.lock"
+    checks = 0
+
+    def cancel():
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise InterruptedError("等待期间取消")
+
+    with path.open("a+b", buffering=0) as holder:
+        msvcrt.locking(holder.fileno(), msvcrt.LK_NBLCK, 1)
+        try:
+            with pytest.raises(InterruptedError, match="等待期间取消"):
+                with _runtime_lock(path, cancel):
+                    pytest.fail("两个持有者同时取得同一把锁")
+        finally:
+            msvcrt.locking(holder.fileno(), msvcrt.LK_UNLCK, 1)
+    assert checks == 2
+    with _runtime_lock(path, None):
+        assert path.stat().st_size == 0
 
 
 def test_separate_processes_share_the_verified_runtime(tmp_path):

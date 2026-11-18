@@ -5,6 +5,9 @@ engines:
   # 引擎降级链：yt-dlp 解析失败时依次尝试 you-get / lux
   order: [ytdlp, youget, lux]
 
+pipeline:
+  max_concurrent: 2            # 同时执行的任务数，桌面设置允许 1–4
+
 download:
   backend: adaptive            # native | aria2c | adaptive
   fragments_concurrency: 16    # 分片流并发数（yt-dlp -N，YouTube/B站主力加速）
@@ -14,6 +17,7 @@ download:
   custom_proxy: ""             # proxy_mode=custom 时的代理地址
   aria2c:
     enabled: true              # 服务启动自动拉起 bin/ 内置 aria2c，直链 16 连接；不可达自动降级
+    mode: auto                 # auto：默认内置，自定义地址或密钥时用外部；bundled / external 可显式指定
     rpc_url: http://127.0.0.1:6800/jsonrpc
     secret: ""                 # aria2c --rpc-secret 对应值
     poll_interval: 0.5         # 进度轮询间隔（秒）
@@ -50,6 +54,7 @@ translator:
     timeout: 60
 
 render:
+  gpu_overlay: auto            # auto：已实测过线的设备及 4K 双区优先单进程；on：尝试兼容片源；off：传统渲染
   default: softmux             # softmux 软封装（快）| burn 硬字幕烧录
   font_size: 18
   font_name: ""                # 硬字幕字体，如 Microsoft YaHei / SimHei；空 = 默认

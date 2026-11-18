@@ -93,7 +93,7 @@ def test_cloud_words_only_spacing_does_not_join_english_or_separate_chinese(tmp_
     assert [cue.text for cue in cues] == [expected]
 
 
-def test_blank_local_decode_retries_without_vad(monkeypatch, tmp_path):
+def test_blank_local_decode_retries_without_vad(monkeypatch, pcm_file):
     worker = FasterWhisperTranscriber(Config({"transcriber": {"idle_unload_minutes": 0}}))
     calls = []
     def transcribe(*args, **kwargs):
@@ -102,7 +102,7 @@ def test_blank_local_decode_retries_without_vad(monkeypatch, tmp_path):
         return iter([SimpleNamespace(text=text, words=None, start=0, end=1)]), SimpleNamespace(
             duration=1, language='en')
     monkeypatch.setattr(worker, '_load_model', lambda *a, **kw: SimpleNamespace(transcribe=transcribe))
-    transcript = worker.transcribe(tmp_path / 'unused.wav')
+    transcript = worker.transcribe(pcm_file())
     assert calls == [True, False]
     assert transcript.segments == [Segment(0, 1, 'hello')]
 
@@ -167,7 +167,7 @@ def test_cloud_request_only_adds_word_option_for_supported_vendor(monkeypatch, t
     assert data[0].get('timestamp_granularities[]') == timestamps
 
 
-def test_pipeline_cache_subtitles_and_translation_keep_dialogue_times(monkeypatch, tmp_path):
+def test_pipeline_cache_subtitles_and_translation_keep_dialogue_times(monkeypatch, tmp_path, pcm_file):
     from app.models.db import Store
     from app.pipeline.runner import PipelineRunner
     from app.services.transcriber import Transcript
@@ -181,11 +181,11 @@ def test_pipeline_cache_subtitles_and_translation_keep_dialogue_times(monkeypatc
     runner._data = tmp_path / 'isolated'
     runner._transcriber = worker
     task = runner.create_task('https://example.test/dialogue', 'best', ['en'], 'none', title='对话')
-    transcript, path = runner._stage_transcribe(task, tmp_path / 'unused.mp4', tmp_path / 'unused.wav')
+    transcript, path = runner._stage_transcribe(task, tmp_path / 'unused.mp4', pcm_file(seconds=3))
     assert parse_srt(path.read_text(encoding='utf-8-sig')) == transcript.segments
     cached = Transcript.load_json(runner._data / 'cache' / 'transcripts' / (task['id'] + '.json'))
     assert cached.segments == [Segment(.1, .6, '你好。'), Segment(1, 1.5, '再见。')]
-    monkeypatch.setattr('app.pipeline.runner.build_translator', lambda *_: SimpleNamespace(
+    monkeypatch.setattr('app.pipeline.translation.build_translator', lambda *_: SimpleNamespace(
         translate=lambda texts, *a, **kw: ['Hello.', 'Goodbye.']))
     translated = runner._stage_translate(task, transcript, ['en'])['en']
     assert parse_srt(translated.read_text(encoding='utf-8-sig')) == [

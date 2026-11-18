@@ -37,11 +37,13 @@ video-subtitler/bin/cuda/*
 !video-subtitler/build/
 video-subtitler/build/*
 !video-subtitler/build/build.spec
+!video-subtitler/build/build-ffprobe.sh
 **/__pycache__/
 **/.pytest_cache/
 **/graphify-out/
 **/.venv/
 *.pyc
+*.egg-info/
 *.pdb
 *.log
 *.db

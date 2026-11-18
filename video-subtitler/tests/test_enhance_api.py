@@ -26,13 +26,13 @@ def test_legacy_anime_request_is_rejected_before_probe(monkeypatch):
     monkeypatch.setattr(services, "enhancer", SimpleNamespace(status=lambda: {
         "installed": True, "available": True}), raising=False)
     with TestClient(server.create_app()) as client:
-        monkeypatch.setattr(server._router, "probe", lambda url: (
+        monkeypatch.setattr(client.app.state.runtime.router, "probe", lambda url: (
             calls.append(url), SimpleNamespace(title="clip")))
-        monkeypatch.setattr(server, "_run", lambda _: None)
+        monkeypatch.setattr(client.app.state.runtime, "run_task", lambda _: None)
         response = client.post("/api/v1/tasks", json={
             "url": "https://example.test/video", "enhance": True,
             "enhance_scale": 4}, headers={"Host": "127.0.0.1:8766"})
-        assert server._store.list_tasks() == []
+        assert client.app.state.runtime.store.list_tasks() == []
     assert response.status_code == 422
     assert "已移除" in response.json()["detail"]
     assert calls == []
@@ -40,9 +40,9 @@ def test_legacy_anime_request_is_rejected_before_probe(monkeypatch):
 
 def test_disabled_legacy_anime_fields_do_not_block_download(monkeypatch):
     with TestClient(server.create_app()) as client:
-        monkeypatch.setattr(server._router, "probe", lambda _: (
+        monkeypatch.setattr(client.app.state.runtime.router, "probe", lambda _: (
             "test", SimpleNamespace(title="clip")))
-        monkeypatch.setattr(server, "_run", lambda _: None)
+        monkeypatch.setattr(client.app.state.runtime, "run_task", lambda _: None)
         response = client.post("/api/v1/tasks", json={
             "url": "https://example.test/video", "enhance": False,
             "enhance_scale": 3}, headers={"Host": "127.0.0.1:8766"})

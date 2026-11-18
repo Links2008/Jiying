@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jiying.Native" />
+    <InternalsVisibleTo Include="EngineArtifactRegression" />
+    <InternalsVisibleTo Include="UiRegression" />
+    <InternalsVisibleTo Include="DesktopRaceRegression" />
+    <InternalsVisibleTo Include="EditingRegression" />
+  </ItemGroup>
+</Project>

@@ -1,5 +1,4 @@
 using System.IO;
-using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -41,7 +40,7 @@ internal static class DouyinWebsiteRegression
                 File.WriteAllText(Path.Combine(output, "douyin-loading-diagnostic.json"), await core.ExecuteScriptAsync("({path:location.pathname,title:document.title,text:document.body?.innerText.slice(0,1500),sdk:!!window.douyinPanel?.showLoginCheck,scripts:document.scripts.length,ready:document.readyState,focused:document.hasFocus(),visibility:document.visibilityState})"));
                 throw new InvalidOperationException("Douyin QR did not load; isolated diagnostic saved");
             }
-            var stateScript = (string)typeof(PlatformConnectionWindow).GetField("DouyinLoginStateScript", BindingFlags.Static | BindingFlags.NonPublic)!.GetRawConstantValue()!;
+            var stateScript = PlatformConnectionWindow.DouyinLoginStateScript;
             using var state = JsonDocument.Parse(await core.ExecuteScriptAsync(stateScript));
             check(!state.RootElement.GetProperty("authenticated").GetBoolean() && saved == 0, "抖音官网访客不会自动保存");
             File.WriteAllText(Path.Combine(output, "douyin-sdk-api.json"), await core.ExecuteScriptAsync("""
@@ -84,7 +83,7 @@ internal static class DouyinWebsiteRegression
             using (var preview = File.Create(Path.Combine(output, "douyin-qr-webview.png"))) await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, preview);
             }
             else await Wait(() => Task.FromResult(core.Source.StartsWith("https://www.douyin.com/", StringComparison.Ordinal)));
-            var fixtureStateScript = (string)typeof(PlatformConnectionWindow).GetField("DouyinLoginStateScript", BindingFlags.Static | BindingFlags.NonPublic)!.GetRawConstantValue()!;
+            var fixtureStateScript = PlatformConnectionWindow.DouyinLoginStateScript;
             var fixture = Path.Combine(output, "douyin-fixture"); Directory.CreateDirectory(fixture);
             File.WriteAllText(Path.Combine(fixture, "index.html"), """
                 <!doctype html><title>JIYING_DOUYIN_FIXTURE</title>
@@ -166,7 +165,7 @@ internal static class DouyinWebsiteRegression
                 File.WriteAllText(Path.Combine(output, "douyin-completion-diagnostic.json"), JsonSerializer.Serialize(new {
                     state = JsonDocument.Parse(await core.ExecuteScriptAsync(fixtureStateScript)).RootElement.Clone(),
                     saved, status = ((TextBlock)connection.FindName("ConnectionStatus")).Text, cookies = conversions,
-                    saveFailed = typeof(PlatformConnectionWindow).GetField("_saveFailed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(connection)
+                    saveFailed = connection.SessionSaveFailed
                 }));
             }
         }
@@ -198,7 +197,7 @@ internal static class DouyinWebsiteRegression
                     throw new InvalidOperationException("Homepage fixture did not load");
                 var cookie = core.CookieManager.CreateCookie("sessionid", "isolated-fixture", ".douyin.com", "/");
                 cookie.IsSecure = cookie.IsHttpOnly = true; core.CookieManager.AddOrUpdateCookie(cookie);
-                var script = (string)typeof(PlatformConnectionWindow).GetField("DouyinLoginStateScript", BindingFlags.Static | BindingFlags.NonPublic)!.GetRawConstantValue()!;
+                var script = PlatformConnectionWindow.DouyinLoginStateScript;
                 await core.ExecuteScriptAsync("window.fixtureSDKReady=true");
                 await core.ExecuteScriptAsync(script);
                 await core.ExecuteScriptAsync("window.fixtureCallbacks.onSuccess()");
@@ -208,7 +207,7 @@ internal static class DouyinWebsiteRegression
                 File.WriteAllText(Path.Combine(output, "douyin-picker-diagnostic.json"), JsonSerializer.Serialize(new {
                     document = JsonDocument.Parse(await core.ExecuteScriptAsync("({path:location.pathname,query:location.search,style:!!document.getElementById('jiying-scan-style')})")).RootElement.Clone(),
                     status = ((TextBlock)connection.FindName("ConnectionStatus")).Text,
-                    saveFailed = typeof(PlatformConnectionWindow).GetField("_saveFailed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(connection)
+                    saveFailed = connection.SessionSaveFailed
                 }));
                 check(await Wait(async () => await core.ExecuteScriptAsync("!document.getElementById('jiying-scan-style') && location.search==='?recommend=1'") == "true", 10),
                     "选择视频时移除扫码样式并打开原推荐首页");

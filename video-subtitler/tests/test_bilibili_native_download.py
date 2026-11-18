@@ -10,6 +10,7 @@ from app.services import renderer
 from app.services.downloader import native_ranges
 from app.services.engines import ytdlp_engine
 from app.services.engines.base import DirectTarget, DownloadProgress
+from app.services.engines.platform_links import normalize_media_url
 
 
 def prepare_engine(monkeypatch, tmp_path, native_error=None, partial=False, mux_error=None):
@@ -26,7 +27,7 @@ def prepare_engine(monkeypatch, tmp_path, native_error=None, partial=False, mux_
                 path.write_bytes(b"aria output")
             return files
 
-    def range_download(ydl, target, directory, on_progress=None, task_id=None, concurrency=16):
+    def range_download(ydl, target, directory, on_progress=None, task_id=None, concurrency=16, stop_event=None):
         native_calls.append((target, directory, task_id, concurrency))
         output = directory / target.filename
         if native_error:
@@ -75,9 +76,10 @@ def prepare_engine(monkeypatch, tmp_path, native_error=None, partial=False, mux_
 def test_bilibili_exact_split_uses_native_ranges_and_original_mux(monkeypatch, tmp_path, url):
     h = prepare_engine(monkeypatch, tmp_path)
     files = h.engine.download(url, "30116", tmp_path, task_id="route-test")
-    assert h.resolved == [(url, "30116")]
-    assert [call[0] for call in h.native] == h.targets
-    assert all(call[1:] == (tmp_path, "route-test", 16) for call in h.native)
+    assert h.resolved == [(normalize_media_url(url), "30116")]
+    assert {call[0].kind for call in h.native} == {target.kind for target in h.targets}
+    assert all(call[1:3] == (tmp_path, "route-test") for call in h.native)
+    assert sum(call[3] for call in h.native) == 16
     assert h.aria == [] and h.fallback == []
     assert h.mux == [(tmp_path / h.targets[0].filename, tmp_path / h.targets[1].filename)]
     assert files == [tmp_path / "clip.mp4"]
@@ -100,7 +102,7 @@ def test_native_range_error_never_falls_back_or_redownloads(monkeypatch, tmp_pat
     with pytest.raises(AppError) as caught:
         h.engine.download("https://www.bilibili.com/video/BVexample/", "30116", tmp_path)
     assert caught.value is error
-    assert len(h.native) == 1 and h.aria == [] and h.fallback == [] and h.mux == []
+    assert 1 <= len(h.native) <= 2 and h.aria == [] and h.fallback == [] and h.mux == []
     assert not list(tmp_path.parent.glob(tmp_path.name + ".invalid-*"))
     if partial:
         assert (tmp_path / (h.targets[0].filename + ".part")).read_bytes() == b"partial bytes"

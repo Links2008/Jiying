@@ -5,11 +5,15 @@ MVP 用标准库 sqlite3（PyInstaller 友好、零额外依赖）；
 """
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from time import monotonic
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS task (
@@ -26,7 +30,7 @@ CREATE TABLE IF NOT EXISTS task (
     finished_at   TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS task_stage (
-    task_id     TEXT NOT NULL,
+    task_id     TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     stage       TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'pending',     -- pending/running/done/failed
     error       TEXT DEFAULT '',
@@ -36,7 +40,7 @@ CREATE TABLE IF NOT EXISTS task_stage (
 );
 CREATE TABLE IF NOT EXISTS artifact (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id      TEXT NOT NULL,
+    task_id      TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     kind         TEXT NOT NULL,        -- video/audio/subtitle/output
     path         TEXT NOT NULL,
     resolution   TEXT DEFAULT '',
@@ -45,7 +49,7 @@ CREATE TABLE IF NOT EXISTS artifact (
 );
 CREATE TABLE IF NOT EXISTS download_job (
     id             TEXT PRIMARY KEY,
-    task_id        TEXT NOT NULL,
+    task_id        TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     kind           TEXT DEFAULT 'merged',   -- video/audio/merged（直连 aria2c 时拆分）
     protocol       TEXT DEFAULT 'direct',   -- direct | fragments
     backend        TEXT DEFAULT 'native',   -- native | aria2c
@@ -67,6 +71,42 @@ CREATE INDEX IF NOT EXISTS idx_artifact_task ON artifact(task_id);
 CREATE INDEX IF NOT EXISTS idx_job_task ON download_job(task_id);
 """
 
+_RELATIONS = ("task_stage", "artifact", "download_job")
+
+_LOCATIONS = (
+    "CREATE TABLE IF NOT EXISTS artifact_location (artifact_id INTEGER PRIMARY KEY "
+    "REFERENCES artifact(id) ON DELETE CASCADE, path_key TEXT, file_key TEXT, mutable INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_artifact_path ON artifact(path, task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_location_path ON artifact_location(path_key)",
+    "CREATE INDEX IF NOT EXISTS idx_location_file ON artifact_location(file_key) WHERE file_key IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_location_mutable ON artifact_location(mutable) WHERE mutable=1",
+    "CREATE TRIGGER IF NOT EXISTS artifact_location_changed AFTER UPDATE OF path ON artifact "
+    "WHEN old.path<>new.path BEGIN DELETE FROM artifact_location WHERE artifact_id=new.id; END",
+)
+
+
+def _wal_supported(path: Path) -> bool:
+    version = sqlite3.sqlite_version_info
+    # SQLite 3.51.3 及官方回移植修复了多个 WAL 连接并发 checkpoint 时的已知问题。
+    patched = version >= (3, 51, 3) or ((3, 50, 7) <= version < (3, 51)) or ((3, 44, 6) <= version < (3, 45))
+    if not patched or str(path).startswith(("\\\\", "//")):
+        return False
+    if os.name == "nt":
+        import ctypes
+        return ctypes.windll.kernel32.GetDriveTypeW(path.anchor) == 3
+    return True
+
+
+def _path_identity(path: str) -> tuple[str, str | None, bool]:
+    lexical = Path(os.path.abspath(path))
+    try:
+        canonical = lexical.resolve()
+        info = canonical.stat()
+        fingerprint = f"{info.st_dev:x}:{info.st_ino:x}" if info.st_ino else None
+        return os.path.normcase(str(canonical)), fingerprint, canonical != lexical
+    except (OSError, RuntimeError, ValueError):
+        return os.path.normcase(str(lexical)), None, True
+
 # 轻量迁移：新增列（老库自动补齐，避免重建数据）
 _MIGRATIONS = {
     "task": {
@@ -77,6 +117,8 @@ _MIGRATIONS = {
         "source_lang": "TEXT DEFAULT ''",  # 源语言（空 = 自动检测）
         "outline": "INTEGER DEFAULT 1",    # 硬字幕黑色描边粗细（0-8）
         "bilingual": "INTEGER DEFAULT 0",  # 双语上下堆叠（上=源语言 下=译文）
+        "person_notes": "INTEGER DEFAULT 0",  # 旧任务默认不添加人名注释
+        "audio_subtitles": "INTEGER DEFAULT 1",
         "translate": "INTEGER DEFAULT 1",  # 旧任务沿用原有自动翻译行为
         "color": "TEXT DEFAULT '#FFFFFF'",
         "vertical_offset": "INTEGER DEFAULT 0",
@@ -95,33 +137,144 @@ class Store:
     """线程安全的薄封装：CLI 单线程、API 多线程共用。"""
 
     def __init__(self, path: str | Path):
+        self._path = Path(path).resolve() if str(path) != ":memory:" else None
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
-        with self._lock:
+        self._closed = False
+        self._reader_state = threading.Condition()
+        self._reader_local = threading.local()
+        self._readers: dict[threading.Thread, sqlite3.Connection] = {}
+        self._active_readers = 0
+        self._reader_sweep_at = 0.
+        try:
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            self.wal_enabled = bool(self._path and _wal_supported(self._path) and
+                                    self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal")
             self._conn.executescript(_SCHEMA)
-            for table, cols in _MIGRATIONS.items():
-                existing = {r["name"] for r in
-                            self._conn.execute(f"PRAGMA table_info({table})")}
-                for col, ddl in cols.items():
-                    if col not in existing:
-                        self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
-            self._conn.commit()
+            with self._conn:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._migrate_relations()
+                for table, cols in _MIGRATIONS.items():
+                    existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                    for col, ddl in cols.items():
+                        if col not in existing:
+                            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+                for statement in _LOCATIONS:
+                    self._conn.execute(statement)
+                # 旧版回退期间可能手工清除关系表行，回到新版时补齐索引。
+                self._conn.execute("DELETE FROM artifact_location WHERE artifact_id NOT IN (SELECT id FROM artifact)")
+                old_paths = self._conn.execute(
+                    "SELECT a.id,a.path FROM artifact a LEFT JOIN artifact_location l ON l.artifact_id=a.id "
+                    "WHERE l.artifact_id IS NULL").fetchall()
+                for row in old_paths:
+                    self._put_location(row["id"], _path_identity(row["path"]))
+        except BaseException:
+            self._conn.close()
+            raise
+
+    def _migrate_relations(self) -> None:
+        for table in _RELATIONS:
+            if self._conn.execute(f"PRAGMA foreign_key_list({table})").fetchone():
+                continue
+            source = f"_old_{table}"
+            self._conn.execute(f"ALTER TABLE {table} RENAME TO {source}")
+            declaration = next(sql for sql in _SCHEMA.split(";")
+                               if sql.strip().startswith(f"CREATE TABLE IF NOT EXISTS {table} "))
+            self._conn.execute(declaration)
+            detached = self._conn.execute(
+                f"SELECT * FROM {source} WHERE task_id NOT IN (SELECT id FROM task)").fetchall()
+            if detached:
+                self._conn.execute("CREATE TABLE IF NOT EXISTS legacy_orphan "
+                                   "(source_table TEXT NOT NULL, previous_record TEXT NOT NULL)")
+                self._conn.executemany("INSERT INTO legacy_orphan VALUES (?,?)",
+                    [(table, json.dumps(dict(row), ensure_ascii=False)) for row in detached])
+            columns = ",".join(row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})"))
+            self._conn.execute(f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {source} "
+                               "WHERE task_id IN (SELECT id FROM task)")
+            if table == "artifact":
+                previous = self._conn.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (source,)).fetchone()
+                if previous:
+                    self._conn.execute("INSERT OR IGNORE INTO sqlite_sequence(name,seq) "
+                                       "SELECT 'artifact',? WHERE NOT EXISTS "
+                                       "(SELECT 1 FROM sqlite_sequence WHERE name='artifact')", (previous[0],))
+                    self._conn.execute("UPDATE sqlite_sequence SET seq=max(seq,?) WHERE name='artifact'", (previous[0],))
+            self._conn.execute(f"DROP TABLE {source}")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_task ON artifact(task_id)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_job_task ON download_job(task_id)")
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise sqlite3.ProgrammingError("任务存储已关闭")
+
+    @contextmanager
+    def _main_connection(self):
+        with self._lock:
+            self._require_open()
+            yield self._conn
+
+    @contextmanager
+    def _reader(self):
+        if not self.wal_enabled:
+            with self._main_connection() as reader:
+                yield reader
+            return
+        with self._reader_state:
+            self._require_open()
+            reader = getattr(self._reader_local, "connection", None)
+            now = monotonic()
+            if reader is None or now >= self._reader_sweep_at:
+                for thread in tuple(self._readers):
+                    if not thread.is_alive():
+                        self._readers.pop(thread).close()
+                # 在正常读请求中低频回收，空闲时无需运行维护线程。
+                self._reader_sweep_at = now + 5
+            if reader is None:
+                # 正常读只由所属线程执行。关库方等所有快照释放后可跨线程关闭。
+                reader = sqlite3.connect(self._path.as_uri() + "?mode=ro", uri=True, timeout=5,
+                                         check_same_thread=False)
+                reader.row_factory = sqlite3.Row
+                self._reader_local.connection = reader
+                self._readers[threading.current_thread()] = reader
+            self._active_readers += 1
+        try:
+            reader.execute("BEGIN")
+            try:
+                yield reader
+            finally:
+                reader.rollback()
+        finally:
+            with self._reader_state:
+                self._active_readers -= 1
+                if not self._active_readers:
+                    self._reader_state.notify_all()
+
+    def close(self):
+        with self._lock:
+            if self._closed:
+                return
+            with self._reader_state:
+                self._closed = True
+                self._reader_state.wait_for(lambda: not self._active_readers)
+                for reader in self._readers.values():
+                    reader.close()
+                self._readers.clear()
+                self._reader_local = threading.local()
+            self._conn.close()
 
     def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        with self._lock:
-            cur = self._conn.execute(sql, params)
-            self._conn.commit()
-            return cur
+        with self._main_connection() as conn, conn:
+            return conn.execute(sql, params)
 
     def _fetchone(self, sql: str, params: tuple = ()) -> sqlite3.Row | None:
         # 同一连接的游标也需要保护，不能在解锁后再 fetch。
-        with self._lock:
-            return self._conn.execute(sql, params).fetchone()
+        with self._reader() as reader:
+            return reader.execute(sql, params).fetchone()
 
     def _fetchall(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
-        with self._lock:
-            return self._conn.execute(sql, params).fetchall()
+        with self._reader() as reader:
+            return reader.execute(sql, params).fetchall()
 
     # ---- task ----
     def create_task(self, url: str, resolution: str, langs: list[str],
@@ -131,18 +284,18 @@ class Store:
                     outline: int = 1, bilingual: bool = False,
                     translate: bool = True, color: str = "#FFFFFF",
                     vertical_offset: int = 0,
-                    horizontal_offset: int = 0) -> dict:
+                    horizontal_offset: int = 0, person_notes: bool = False, audio_subtitles: bool = True) -> dict:
         tid = uuid.uuid4().hex[:12]
         self._exec(
             "INSERT INTO task (id, url, url_key, title, status, resolution, target_langs,"
             " subtitle_mode, output_dir, font_name, font_size, position, source_lang,"
-            " outline, bilingual, translate, color, vertical_offset, horizontal_offset, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " outline, bilingual, translate, color, vertical_offset, horizontal_offset, person_notes, audio_subtitles, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (tid, url, url, title, "pending", resolution, ",".join(langs), subtitle_mode,
              str(output_dir or ""), str(font_name or ""), int(font_size or 0),
              str(position or "bottom"), str(source_lang or ""), int(outline or 0),
              int(bool(bilingual)), int(bool(translate)), color,
-             int(vertical_offset), int(horizontal_offset), _now()),
+             int(vertical_offset), int(horizontal_offset), int(bool(person_notes)), int(bool(audio_subtitles)), _now()),
         )
         return self.get_task(tid)
 
@@ -151,7 +304,7 @@ class Store:
         （工作线程已随旧进程消失），标记为 interrupted 并允许重试。"""
         ts, error = _now(), "引擎重启时任务被中断，可重试"
         # 三类记录一起提交，避免任务已进入终态而阶段或下载作业仍显示运行中。
-        with self._lock, self._conn:
+        with self._main_connection() as conn, conn:
             active = "SELECT id FROM task WHERE status IN ('running','pending','created')"
             self._conn.execute(
                 "UPDATE task_stage SET status='interrupted', error=?, finished_at=?"
@@ -174,14 +327,15 @@ class Store:
         """提交/重试复用相同输出设置的活跃任务；终态不阻止用户重新提交。"""
         options = ("resolution", "target_langs", "subtitle_mode", "output_dir",
                    "font_name", "font_size", "position", "source_lang", "outline",
-                   "bilingual", "translate", "color", "vertical_offset", "horizontal_offset")
+                   "bilingual", "translate", "color", "vertical_offset", "horizontal_offset", "person_notes",
+                   "audio_subtitles")
         rows = self._fetchall(
             "SELECT * FROM task WHERE url=? AND id<>?"
             " AND status IN ('pending','running','created') ORDER BY created_at",
             (task["url"], task.get("id", "")),
         )
         return next((dict(row) for row in rows
-                     if all(row[key] == task[key] for key in options)), None)
+                     if all(row[key] == task.get(key, int(key == "audio_subtitles")) for key in options)), None)
 
     def claim_retry(self, task_id: str) -> bool:
         """一次条件更新领取重试，多个请求不能同时启动同一任务。"""
@@ -200,7 +354,7 @@ class Store:
         return self._claim_snapshot(task_id, retry=False)
 
     def _claim_snapshot(self, task_id: str, *, retry: bool) -> dict | None:
-        with self._lock, self._conn:
+        with self._main_connection() as conn, conn:
             row = self._conn.execute("SELECT * FROM task WHERE id=?", (task_id,)).fetchone()
             if row is None:
                 return None
@@ -219,7 +373,7 @@ class Store:
 
     def request_cancel_if_active(self, task_id: str, request_cancel) -> dict | None:
         """检查当前状态并请求取消，防止任务已结束后旧快照重新置位。"""
-        with self._lock:
+        with self._main_connection():
             row = self._conn.execute("SELECT * FROM task WHERE id=?", (task_id,)).fetchone()
             if row is None:
                 return None
@@ -232,12 +386,33 @@ class Store:
         rows = self._fetchall("SELECT * FROM task ORDER BY created_at DESC")
         return [dict(r) for r in rows]
 
+    def task_snapshot(self, ids: tuple[str, ...] = (), *, include_artifacts: bool = False) -> list[dict]:
+        """从同一份读取事务批量查询任务及关联行。"""
+        where = f" WHERE t.id IN ({','.join('?' for _ in ids)})" if ids else ""
+        with self._reader() as reader:
+            tasks = reader.execute(
+                f"SELECT t.* FROM task t{where} ORDER BY t.created_at DESC, t.id", ids
+            ).fetchall()
+            stages = reader.execute(
+                f"SELECT s.* FROM task_stage s JOIN task t ON t.id=s.task_id{where}"
+                " ORDER BY s.started_at, s.stage", ids
+            ).fetchall()
+            artifacts = reader.execute(
+                f"SELECT a.* FROM artifact a JOIN task t ON t.id=a.task_id{where} ORDER BY a.id", ids
+            ).fetchall() if include_artifacts else ()
+        items = {row["id"]: dict(row, stages=[]) for row in tasks}
+        for row in stages:
+            items[row["task_id"]]["stages"].append(dict(row))
+        if include_artifacts:
+            for item in items.values():
+                item["artifacts"] = []
+            for row in artifacts:
+                items[row["task_id"]]["artifacts"].append(dict(row))
+        return list(items.values())
+
     def delete_task(self, task_id: str) -> None:
         """删除任务记录（含阶段/产物/下载作业登记；不删磁盘文件）"""
-        with self._lock, self._conn:
-            self._conn.execute("DELETE FROM artifact WHERE task_id=?", (task_id,))
-            self._conn.execute("DELETE FROM task_stage WHERE task_id=?", (task_id,))
-            self._conn.execute("DELETE FROM download_job WHERE task_id=?", (task_id,))
+        with self._main_connection() as conn, conn:
             self._conn.execute("DELETE FROM task WHERE id=?", (task_id,))
 
     def update_task(self, task_id: str, **fields) -> None:
@@ -250,6 +425,7 @@ class Store:
         from ..core import cancel as task_cancel
         with self._lock:
             try:
+                self._require_open()
                 with self._conn:
                     statement = self._task_update_statement(task_id, fields)
                     if statement is not None:
@@ -302,17 +478,25 @@ class Store:
         return [dict(r) for r in rows]
 
     # ---- artifact ----
+    def _put_location(self, artifact_id, identity):
+        self._conn.execute("INSERT OR REPLACE INTO artifact_location VALUES (?,?,?,?)", (artifact_id, *identity))
+
     def add_artifact(self, task_id: str, kind: str, path: str,
                      resolution: str = "", lang: str = "") -> None:
-        self._exec(
-            "INSERT INTO artifact (task_id, kind, path, resolution, lang, created_at)"
-            " VALUES (?,?,?,?,?,?)",
-            (task_id, kind, str(path), resolution, lang, _now()),
-        )
+        identity = _path_identity(path)
+        with self._main_connection() as conn, conn:
+            cursor = self._conn.execute(
+                "INSERT INTO artifact (task_id, kind, path, resolution, lang, created_at) VALUES (?,?,?,?,?,?)",
+                (task_id, kind, str(path), resolution, lang, _now()))
+            self._put_location(cursor.lastrowid, identity)
 
     def move_artifact(self, task_id: str, old_path: str, new_path: str) -> None:
-        self._exec("UPDATE artifact SET path=? WHERE task_id=? AND path=?",
-                   (str(new_path), task_id, str(old_path)))
+        identity = _path_identity(new_path)
+        with self._main_connection() as conn, conn:
+            rows = self._conn.execute("UPDATE artifact SET path=? WHERE task_id=? AND path=? RETURNING id",
+                                      (str(new_path), task_id, str(old_path))).fetchall()
+            for row in rows:
+                self._put_location(row["id"], identity)
 
     def get_artifact(self, artifact_id: int) -> dict | None:
         row = self._fetchone("SELECT * FROM artifact WHERE id=?", (artifact_id,))
@@ -332,17 +516,21 @@ class Store:
         )
         if row is not None:
             return True
-        # 历史登记可能包含 .. 或符号链接，字符串不同仍可能指向同一文件。
-        try:
-            resolved = Path(path).resolve()
-        except (OSError, RuntimeError):
-            return False
-        for other_path in self.artifact_paths_owned_by_other(task_id):
-            try:
-                if Path(other_path).resolve() == resolved:
-                    return True
-            except (OSError, RuntimeError):
-                continue
+        # 常见路径只查索引。之前缺失或通过别名登记的少量路径可被重新指向，
+        # 因此必要时重验这组文件，磁盘读取发生在数据库事务之外。
+        resolved, file_id, _ = _path_identity(path)
+        candidates = self._fetchall(
+            "SELECT a.path FROM artifact a JOIN artifact_location l ON l.artifact_id=a.id "
+            "WHERE a.task_id<>? AND l.path_key=? "
+            "UNION SELECT a.path FROM artifact a JOIN artifact_location l ON l.artifact_id=a.id "
+            "WHERE a.task_id<>? AND l.file_key IS NOT NULL AND l.file_key=? "
+            "UNION SELECT a.path FROM artifact a JOIN artifact_location l ON l.artifact_id=a.id "
+            "WHERE a.task_id<>? AND l.mutable=1",
+            (task_id, resolved, task_id, file_id, task_id))
+        for row in candidates:
+            actual, actual_id, _ = _path_identity(row["path"])
+            if actual == resolved or file_id is not None and actual_id == file_id:
+                return True
         return False
 
     def artifact_paths_owned_by_other(self, task_id: str) -> list[str]:

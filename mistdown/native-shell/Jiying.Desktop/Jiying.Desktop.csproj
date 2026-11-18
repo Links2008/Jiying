@@ -3,11 +3,11 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <StartupObject>Jiying.Desktop.Program</StartupObject>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Jiying.Native</AssemblyName>
-    <Version>1.1.34.0</Version>
     <RootNamespace>Jiying.Desktop</RootNamespace>
     <ApplicationIcon>..\..\jiying.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -15,10 +15,14 @@
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <JiyingEngineDir Condition="'$(JiyingEngineDir)' == ''">..\..\dist\engine</JiyingEngineDir>
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="UiRegression" />
+    <InternalsVisibleTo Include="DesktopRaceRegression" />
+    <ProjectReference Include="../Jiying.Core/Jiying.Core.csproj" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3650.58" />
     <Resource Include="..\..\etch-bg.jpg">
       <Link>Assets\etch-bg.jpg</Link>

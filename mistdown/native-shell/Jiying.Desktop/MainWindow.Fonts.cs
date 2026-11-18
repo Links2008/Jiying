@@ -7,6 +7,7 @@ namespace Jiying.Desktop;
 public partial class MainWindow
 {
     private bool _fontChoicesLoaded;
+    internal bool FontChoicesLoaded => _fontChoicesLoaded;
 
     private void EnsureSavedFontChoice()
     {
@@ -14,7 +15,7 @@ public partial class MainWindow
             FontNameBox.Items.Add(new ComboBoxItem { Tag = _ui.FontName, Content = _ui.FontName });
     }
 
-    private void FontNameBox_DropDownOpened(object? sender, EventArgs e)
+    internal void FontNameBox_DropDownOpened(object? sender, EventArgs e)
     {
         if (_fontChoicesLoaded) return;
         _fontChoicesLoaded = true;

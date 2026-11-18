@@ -1,6 +1,5 @@
 // 使用隔离窗口与自生成历史记录测量导航，不读取安装中的配置或任务。
 using System.Diagnostics;
-using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,18 +10,16 @@ internal static class NavigationRegression
 {
     internal static async Task Run(MainWindow window, Action<bool, string> check)
     {
-        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        T Field<T>(string name) => (T)typeof(MainWindow).GetField(name, flags)!.GetValue(window)!;
-        void Show(string name) => typeof(MainWindow).GetMethod("ShowView", flags)!.Invoke(window, [name]);
-        FrameworkElement View(string name) => Field<FrameworkElement>(name switch
-        { "settings" => "SettingsView", "done" => "DoneView", "queue" => "QueueView", _ => "ParseView" });
+        void Show(string name) => window.ShowView(name);
+        FrameworkElement View(string name) => name switch
+        { "settings" => window.SettingsView, "done" => window.DoneView, "queue" => window.QueueView, _ => window.ParseView };
         window.Width = 1160;
         window.Height = 720;
         for (var i = 0; i < 1500; i++)
             window.DoneTasks.Add(new TaskItem { Id = "nav-" + i, Title = "导航测试视频 " + i,
                                                Status = "completed", CreatedAt = "2026-10-14T12:00:00" });
-        Field<FrameworkElement>("DoneList").Visibility = Visibility.Visible;
-        Field<FrameworkElement>("DoneEmpty").Visibility = Visibility.Collapsed;
+        window.DoneList.Visibility = Visibility.Visible;
+        window.DoneEmpty.Visibility = Visibility.Collapsed;
         Show("parse");
         await Task.Delay(350);
         var results = new List<object>();
@@ -52,9 +49,9 @@ internal static class NavigationRegression
         Show("done");
         await Task.Delay(350);
         window.UpdateLayout();
-        var list = Field<ListView>("DoneList");
+        var list = window.DoneList;
         var rows = Descendants(list).OfType<ListViewItem>().Count();
-        check(list.Items.Count == 1500 && rows > 0 && rows < 100,
+        check(list.Items.OfType<TaskItem>().Count() == 1500 && rows > 0 && rows < 100,
               "1500条历史记录只创建当前可见的任务卡片");
         var path = Environment.GetEnvironmentVariable("JIYING_NAVIGATION_REPORT");
         if (!string.IsNullOrWhiteSpace(path))

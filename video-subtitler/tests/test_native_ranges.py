@@ -22,7 +22,8 @@ from app.services.engines.base import DirectTarget
 def range_server(monkeypatch):
     monkeypatch.setattr(native_ranges, "CHUNK_BYTES", 512 * 1024)
     payload = random.Random(17).randbytes(8 * 512 * 1024 + 123)
-    state = {"mode": "ok", "active": 0, "peak": 0, "sent": 0, "starts": [], "ends": []}
+    state = {"mode": "ok", "active": 0, "peak": 0, "sent": 0, "starts": [], "ends": [],
+             "etag": '"isolated-source-v1"'}
     lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
@@ -30,10 +31,12 @@ def range_server(monkeypatch):
             pass
 
         def do_HEAD(self):
-            if state["mode"] == "head405":
-                self.send_error(405)
+            if state["mode"].startswith("head"):
+                self.send_error(int(state["mode"][4:7]))
                 return
             self.send_response(200)
+            if state["etag"]:
+                self.send_header("ETag", state["etag"])
             if state["mode"] != "unknown-size":
                 self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -67,6 +70,8 @@ def range_server(monkeypatch):
                     hi -= 1
                 elif state["mode"] == "wrong-total":
                     total += 1
+                elif state["mode"] == "head404-wrong-range":
+                    lo, hi = 1, 1
                 self.send_response(status)
                 if state["mode"] not in {"missing-range", "ignore"}:
                     self.send_header("Content-Range", f"bytes {lo}-{hi}/{total}")
@@ -152,9 +157,28 @@ def test_unknown_head_size_rejects_before_media_get(range_server, ydl, tmp_path)
     assert state["starts"] == []
 
 
-def test_head_http_error_returns_clear_app_error_without_media_get(range_server, ydl, tmp_path):
+@pytest.mark.parametrize("mode", ["head404", "head405", "head501"])
+def test_rejected_head_uses_one_byte_range_before_downloading(range_server, ydl, tmp_path, mode):
+    target, state, payload = range_server
+    state["mode"] = mode
+    result = native_ranges.download_ranges(ydl, target, tmp_path, None, None, 4)
+    assert result.read_bytes() == payload
+    assert state["starts"][:1] == [0] and state["starts"].count(0) == 2
+    assert "unbounded" not in state["starts"]
+
+
+def test_rejected_head_with_invalid_one_byte_range_does_not_start_download(range_server, ydl, tmp_path):
     target, state, _ = range_server
-    state["mode"] = "head405"
+    state["mode"] = "head404-wrong-range"
+    with pytest.raises(AppError, match="长度"):
+        native_ranges.download_ranges(ydl, target, tmp_path, None, None, 4)
+    assert state["starts"] == [0]
+    assert not (tmp_path / target.filename).exists()
+
+
+def test_head_forbidden_returns_clear_app_error_without_media_get(range_server, ydl, tmp_path):
+    target, state, _ = range_server
+    state["mode"] = "head403"
     with pytest.raises(AppError) as caught:
         native_ranges.download_ranges(ydl, target, tmp_path, None, None, 4)
     assert caught.value.code == Codes.NET_FAILED

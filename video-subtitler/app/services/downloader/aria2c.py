@@ -11,25 +11,42 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import secrets
+import socket
+import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from ...core.errors import AppError, Codes
+from ...core.paths import bin_dir
 from ..engines.base import DirectTarget, DownloadProgress
 
 log = logging.getLogger(__name__)
+_default_rpc_url = "http://127.0.0.1:6800/jsonrpc"
+_startup_lock = threading.Lock()
+
+
+class _NoRpcRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_local_rpc_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRpcRedirect())
 
 
 class Aria2cRpcClient:
     """aria2.addUri / tellStatus / remove 的最小 JSON-RPC 2.0 封装（标准库实现）。"""
 
-    def __init__(self, rpc_url: str, secret: str = "", timeout: float = 10.0):
+    def __init__(self, rpc_url: str, secret: str = "", timeout: float = 10.0, *, managed: bool = False):
         self._url = rpc_url
         self._secret = secret
         self._timeout = timeout
         self._counter = 0
+        self._open = _local_rpc_opener.open if managed else urllib.request.urlopen
 
     def _call(self, method: str, params: list) -> object:
         self._counter += 1
@@ -41,19 +58,27 @@ class Aria2cRpcClient:
             self._url, data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            with self._open(req, timeout=self._timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
             raise AppError(Codes.NET_FAILED, f"aria2c RPC 调用失败：{method}",
                            detail=str(e), retryable=True) from e
+        if not isinstance(data, dict):
+            raise AppError(Codes.NET_FAILED, "aria2c RPC 回复无效")
         if "error" in data:
-            raise AppError(Codes.NET_FAILED,
-                           f"aria2c RPC 错误：{data['error'].get('message', data['error'])}")
+            error = data["error"]
+            message = str(error.get("message", "")) if isinstance(error, dict) else str(error)
+            if self._secret:
+                message = message.replace(self._secret, "[凭据已隐藏]")
+            raise AppError(Codes.NET_FAILED, f"aria2c RPC 错误：{message}")
         return data.get("result")
 
     # ---- JSON-RPC 方法 ----
     def get_version(self) -> dict:
-        return dict(self._call("getVersion", []) or {})
+        response = self._call("getVersion", [])
+        if not isinstance(response, dict) or not response.get("version"):
+            raise AppError(Codes.NET_FAILED, "aria2c RPC 版本回复无效")
+        return response
 
     def add_uri(self, uri: str, options: dict) -> str:
         return str(self._call("addUri", [[uri], options]))
@@ -65,18 +90,78 @@ class Aria2cRpcClient:
         self._call("remove", [gid])
 
 
+def _use_external(ac: dict) -> bool:
+    mode = ac.get("mode", "auto")
+    return mode == "external" or (mode == "auto" and
+                                 (ac.get("secret") or ac.get("rpc_url", _default_rpc_url) != _default_rpc_url))
+
+
+def ensure_managed_rpc(config) -> None:
+    """每个引擎只启动一个内置子进程，握手成功后才发布给下载器。"""
+    with _startup_lock:
+        ac = config.get("download.aria2c", {})
+        if not config.aria2_managed or not ac.get("enabled") or _use_external(ac):
+            return
+        current = config.aria2_runtime
+        if current is not None and current[2].poll() is None:
+            return
+        config.aria2_runtime = None
+        executable = bin_dir() / ("aria2c.exe" if os.name == "nt" else "aria2c")
+        if not executable.is_file():
+            return
+        # 端口如在释放后被占用，只能通过携带本次随机密钥的 RPC 握手。
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        credential = secrets.token_hex(32)
+        url = f"http://127.0.0.1:{port}/jsonrpc"
+        try:
+            process = subprocess.Popen(
+                [str(executable), "--no-conf=true", "--enable-rpc", f"--rpc-listen-port={port}",
+                 "--rpc-listen-all=false", f"--rpc-secret={credential}", "--quiet=true",
+                 f"--stop-with-process={os.getpid()}"],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            log.warning("内置 aria2c 未能启动，将使用原生下载")
+            return
+        client = Aria2cRpcClient(url, credential, timeout=.25, managed=True)
+        deadline = time.monotonic() + 3
+        while process.poll() is None and time.monotonic() < deadline:
+            try:
+                client.get_version()
+                config.aria2_runtime = (url, credential, process)
+                return
+            except AppError:
+                time.sleep(.05)
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        log.warning("内置 aria2c 未能就绪，将使用原生下载")
+
+
 class Aria2cBackend:
     """提交直达流给 aria2c 并轮询进度；失败抛 AppError 由上层降级。"""
 
     def __init__(self, config, client: Aria2cRpcClient | None = None):
         self._cfg = config
         ac = config.get("download.aria2c", {})
-        self._client = client or Aria2cRpcClient(
-            str(ac.get("rpc_url", "http://127.0.0.1:6800/jsonrpc")),
-            str(ac.get("secret") or ""), timeout=10.0)
+        runtime = getattr(config, "aria2_runtime", None)
+        if client is not None:
+            self._client = client
+        elif not getattr(config, "aria2_managed", False) or _use_external(ac):
+            self._client = Aria2cRpcClient(str(ac.get("rpc_url", _default_rpc_url)), str(ac.get("secret") or ""))
+        elif runtime is not None and runtime[2].poll() is None:
+            self._client = Aria2cRpcClient(runtime[0], runtime[1], managed=True)
+        else:
+            self._client = None
 
     def ping(self) -> bool:
         """RPC 可达性预检（不可达时上层直接走 yt-dlp 原生路径）。"""
+        if self._client is None:
+            return False
         try:
             self._client.get_version()
             return True
@@ -96,6 +181,8 @@ class Aria2cBackend:
                       on_progress=None, timeout: float = 7200.0,
                       cancel_check=None) -> list[Path]:
         """并行提交多条流（aria2c 内部各自多连接），聚合进度，全部完成后返回。"""
+        if self._client is None:
+            raise AppError(Codes.NET_FAILED, "内置 aria2c 尚未就绪")
         ac = self._cfg.get("download.aria2c", {})
         dest_dir.mkdir(parents=True, exist_ok=True)
         jobs: list[tuple[DirectTarget, str, Path]] = []

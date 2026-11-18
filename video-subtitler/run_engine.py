@@ -19,6 +19,10 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w', encoding='utf-8')
 
+# 冻结包统一通过 HTTP 下载模型。必须在 Hugging Face Hub 首次导入之前设置。
+if getattr(sys, "frozen", False):
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+
 _DUMP = os.path.join(tempfile.gettempdir(), 'jiying', 'engine_frozen_dump.log')
 try:
     os.makedirs(os.path.dirname(_DUMP), exist_ok=True)
@@ -32,7 +36,19 @@ from app.api.server import main
 
 if __name__ == '__main__':
     try:
-        main()
+        if sys.argv[1:] == ["--restore-legacy-config"]:
+            if os.name != "nt":
+                raise RuntimeError("凭据回退仅适用于 Windows")
+            from app.api.local_session import exclusive_data_dir
+            from app.core.config import restore_legacy_credentials
+            from app.core.paths import data_dir
+
+            with exclusive_data_dir(data_dir()):
+                restore_legacy_credentials()
+        elif sys.argv[1:]:
+            raise RuntimeError("不支持的即影引擎启动参数")
+        else:
+            main()
     except Exception:
         # windowed 模式无处显示异常，落盘便于排查
         try:

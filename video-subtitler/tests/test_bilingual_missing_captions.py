@@ -113,7 +113,7 @@ def test_real_pipeline_preserves_source_and_translations_in_srt_and_video(tmp_pa
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {
             'choices': [{'finish_reason': 'stop', 'message': {
                 'content': json.dumps({'translations': entries}, ensure_ascii=False)}}]})
-    monkeypatch.setattr('requests.post', request)
+    monkeypatch.setattr('requests.Session.post', request)
     monkeypatch.setattr('app.services.translator.time.sleep', lambda _: None)
     translated = runner._stage_translate(task, original, ['zh'])
     outputs = runner._stage_render(task, source, {'en': source_srt, **translated})

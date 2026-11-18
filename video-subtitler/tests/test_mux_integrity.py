@@ -51,18 +51,18 @@ def test_mux_allows_codec_tolerance_and_unknown_duration(tmp_path, monkeypatch, 
 
     def run(args, **kwargs):
         calls.append(args)
-        if kwargs.get("on_time"):
-            kwargs["on_time"](effective)
+        if packets := kwargs.get("stdout"):
+            packets.write(f"#tb 0: 1/1000\n0,0,0,{round(effective * 1000)},12,0x1\n".encode())
 
     monkeypatch.setattr(renderer, "find_ffmpeg", lambda cfg: "ffmpeg")
     monkeypatch.setattr(renderer, "probe_duration", lambda cfg, path: duration)
     monkeypatch.setattr(renderer, "_run", run)
-    monkeypatch.setattr(renderer, "_video_packet_duration", lambda *_: effective)
     output = tmp_path / "merged.mp4"
     assert renderer.mux_av(Config({}), Path("video"), Path("audio"), output) == output
     assert len(calls) == (1 if duration == 0 else 2)
     if duration:
-        assert calls[-1][-6:] == ["0:v:0", "-c", "copy", "-f", "null", "-"]
+        assert calls[-1][-3:] == ["-f", "framecrc", "-"]
+        assert "-xerror" in calls[-1]
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -73,13 +73,12 @@ def test_incomplete_video_fails_outside_container_fallback(tmp_path, monkeypatch
         calls.append(args)
         if fallback and len(calls) == 1:
             raise AppError(Codes.RENDER_FAILED, "MP4 incompatible")
-        if kwargs.get("on_time"):
-            kwargs["on_time"](90)
+        if packets := kwargs.get("stdout"):
+            packets.write(b"#tb 0: 1/1\n0,0,0,90,12,0x1\n")
 
     monkeypatch.setattr(renderer, "find_ffmpeg", lambda cfg: "ffmpeg")
     monkeypatch.setattr(renderer, "probe_duration", lambda cfg, path: 734)
     monkeypatch.setattr(renderer, "_run", run)
-    monkeypatch.setattr(renderer, "_video_packet_duration", lambda *_: 90)
     with pytest.raises(AppError) as error:
         renderer.mux_av(Config({}), Path("video"), Path("audio"), tmp_path / "merged.mp4")
     assert error.value.code == Codes.ENG_FAILED
@@ -102,6 +101,24 @@ def real_split_inputs(tmp_path_factory):
     assert renderer.probe_duration(cfg, video) == pytest.approx(90, abs=.2)
     assert renderer.probe_duration(cfg, audio) == pytest.approx(734, abs=.2)
     return cfg, video, audio
+
+
+def test_compatible_aac_mux_keeps_original_audio_packets(tmp_path):
+    executable = os.environ.get("JIYING_TEST_FFMPEG", "")
+    if not executable:
+        pytest.skip("需要显式指定真实 FFmpeg")
+    video, audio = tmp_path / "video.mp4", tmp_path / "audio.m4a"
+    for args in (["-f", "lavfi", "-i", "testsrc2=s=160x90:r=25:d=1", "-an", "-c:v", "libx264", str(video)],
+                 ["-f", "lavfi", "-i", "sine=frequency=523:duration=1", "-c:a", "aac", "-b:a", "256k", str(audio)]):
+        subprocess.run([executable, "-y", "-v", "error", *args], check=True,
+                       capture_output=True, timeout=15, creationflags=renderer._NO_WINDOW)
+    cfg = Config({"paths": {"ffmpeg": executable}})
+    result = renderer.mux_av(cfg, video, audio, tmp_path / "merged.mp4")
+    def audio_hash(path):
+        return subprocess.check_output([executable, "-v", "error", "-i", str(path),
+            "-map", "0:a:0", "-c:a", "copy", "-f", "hash", "-"], timeout=15,
+            creationflags=renderer._NO_WINDOW)
+    assert audio_hash(result) == audio_hash(audio)
 
 
 def test_real_90_second_video_with_734_second_headers_is_rejected(real_split_inputs, tmp_path, monkeypatch):

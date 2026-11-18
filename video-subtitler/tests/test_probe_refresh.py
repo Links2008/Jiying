@@ -17,7 +17,7 @@ def test_probe_refresh_and_quality_notice(force_refresh, monkeypatch):
         calls.append((url, use_cache))
         return SimpleNamespace(name="test"), result
     with TestClient(server.create_app()) as client:
-        monkeypatch.setattr(server._router, "probe", probe)
+        monkeypatch.setattr(client.app.state.runtime.router, "probe", probe)
         response = client.post("/api/v1/probe", json={
             "url": result.webpage_url, "force_refresh": force_refresh},
             headers={"Host": "127.0.0.1:8766"})

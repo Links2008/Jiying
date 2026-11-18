@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import os
 import tempfile
 import threading
@@ -10,9 +11,11 @@ from pathlib import Path
 import yaml
 
 from .paths import default_config_path  # noqa: F401  (re-export 便于调用方)
-from . import paths as _paths
+from . import paths as _paths, windows_data
 
 _save_lock = threading.RLock()
+log = logging.getLogger(__name__)
+_credential_paths = (("transcriber", "cloud"), ("translator", "llm"))
 
 
 def default_config_path() -> Path:
@@ -25,6 +28,7 @@ DEFAULTS: dict = {
         # 引擎降级链：先 yt-dlp，失败依次换 you-get / lux
         "order": ["ytdlp", "youget", "lux"],
     },
+    "pipeline": {"max_concurrent": 2},
     "download": {
         "backend": "adaptive",           # native | aria2c | adaptive
         "fragments_concurrency": 16,     # yt-dlp -N，分片流并发数（YouTube/B站主力加速）
@@ -36,6 +40,7 @@ DEFAULTS: dict = {
         "aria2c": {
             # 打包版 bin/ 内置 aria2c：服务启动时自动拉起，不可达自动降级原生下载
             "enabled": True,
+            "mode": "auto",               # auto | bundled | external
             "rpc_url": "http://127.0.0.1:6800/jsonrpc",
             "secret": "",                # aria2c --rpc-secret 对应值
             "poll_interval": 0.5,        # tellStatus 轮询间隔（秒）
@@ -114,6 +119,8 @@ class Config:
 
     def __init__(self, data: dict):
         self._data = data
+        self.aria2_managed = False
+        self.aria2_runtime = None
 
     def get(self, dotted: str, default=None):
         node: object = self._data
@@ -142,34 +149,91 @@ class Config:
         self._data = data
 
 
-def save_config(data: dict, path: str | Path | None = None) -> dict:
-    """保留额外配置键，完整写入临时文件后原子替换；失败保留旧文件。"""
-    target = Path(path) if path is not None else default_config_path()
+def _read_mapping(target: Path) -> dict:
+    existing = yaml.safe_load(target.read_text(encoding="utf-8-sig")) if target.exists() else None
+    if existing is None:
+        return {}
+    if not isinstance(existing, dict):
+        raise ValueError("配置根节点必须为映射")
+    return existing
+
+
+def _credential_sections(data: dict):
+    for group, name in _credential_paths:
+        parent = data.get(group)
+        section = parent.get(name) if isinstance(parent, dict) else None
+        if isinstance(section, dict):
+            yield (group, name), section
+
+
+def _decode_credentials(data: dict) -> tuple[bool, dict]:
+    pending, decoded = False, {}
+    for path, section in _credential_sections(data):
+        plain = section.get("api_key")
+        if not plain and section.get("api_key_dpapi"):
+            if os.name != "nt":
+                raise ValueError("此配置的 API 凭据需由原 Windows 用户解锁")
+            encrypted = section["api_key_dpapi"]
+            try:
+                section["api_key"] = windows_data.unprotect(encrypted)
+            except (OSError, ValueError, TypeError):
+                raise ValueError("无法解锁此配置的 Windows API 凭据") from None
+            decoded[path] = (section["api_key"], encrypted)
+        pending |= bool(plain)
+        section.pop("api_key_dpapi", None)
+    return pending, decoded
+
+
+def _write_mapping(target: Path, data: dict) -> None:
+    text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+    target.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
+                                         dir=target.parent, prefix=f".{target.name}.",
+                                         suffix=".tmp", delete=False) as file:
+            temporary = Path(file.name)
+            file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _protected_mapping(data: dict, decoded: dict) -> dict:
+    disk = copy.deepcopy(data)
+    if os.name != "nt":
+        return disk
+    for path, section in _credential_sections(disk):
+        if not section.get("api_key"):
+            continue
+        key = section.pop("api_key")
+        prior_key, encrypted = decoded.get(path, (None, None))
+        section["api_key_dpapi"] = encrypted if prior_key == key else windows_data.protect(key)
+    return disk
+
+
+def save_config(data: dict, path: str | Path | None = None) -> dict:
+    """原子保存磁盘配置，返回解密后的运行配置。"""
+    target = Path(path) if path is not None else default_config_path()
     with _save_lock:
-        existing = {}
-        if target.exists():
-            existing = yaml.safe_load(target.read_text(encoding="utf-8-sig"))
-            if existing is None:
-                existing = {}
-            if not isinstance(existing, dict):
-                raise ValueError("配置根节点必须为映射")
+        existing = _read_mapping(target)
+        _, decoded = _decode_credentials(existing)
         merged = deep_merge(existing, copy.deepcopy(data))
-        text = yaml.safe_dump(merged, allow_unicode=True, sort_keys=False)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
-                                             dir=target.parent, prefix=f".{target.name}.",
-                                             suffix=".tmp", delete=False) as file:
-                temporary = Path(file.name)
-                file.write(text)
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+        _write_mapping(target, _protected_mapping(merged, decoded))
         return merged
+
+
+def restore_legacy_credentials(path: str | Path | None = None) -> None:
+    """仅在明确回退旧版时恢复原有配置格式。"""
+    target = Path(path) if path is not None else default_config_path()
+    with _save_lock:
+        existing = _read_mapping(target)
+        if any(section.get("api_key_dpapi") for _, section in _credential_sections(existing)):
+            _decode_credentials(existing)
+            _write_mapping(target, existing)
 
 
 def _migrate_legacy_llm(user: dict) -> None:
@@ -190,13 +254,18 @@ def _migrate_legacy_llm(user: dict) -> None:
     llm["model"] = ""
 
 
-def load_config(path: str | Path | None = None) -> Config:
+def load_config(path: str | Path | None = None, *, migrate_credentials: bool = False) -> Config:
     """加载配置：默认值 ← config.yaml 深合并。文件不存在时用纯默认值。"""
     data = copy.deepcopy(DEFAULTS)
     p = Path(path) if path else default_config_path()
-    if p.exists():
-        with open(p, encoding="utf-8") as f:
-            user = yaml.safe_load(f) or {}
-        _migrate_legacy_llm(user)
-        deep_merge(data, user)
+    with _save_lock:
+        user = _read_mapping(p)
+        needs_migration, decoded = _decode_credentials(user)
+        if migrate_credentials and needs_migration and os.name == "nt":
+            try:
+                _write_mapping(p, _protected_mapping(user, decoded))
+            except OSError:
+                log.warning("暂时无法迁移现有 API 凭据，将在下次保存配置时重试")
+    _migrate_legacy_llm(user)
+    deep_merge(data, user)
     return Config(data)

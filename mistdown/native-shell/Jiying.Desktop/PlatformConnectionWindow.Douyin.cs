@@ -66,7 +66,7 @@ public partial class PlatformConnectionWindow
         })()
         """;
 
-    private static bool DeferScanResource(string url, CoreWebView2WebResourceContext context, bool selectingVideo)
+    internal static bool DeferScanResource(string url, CoreWebView2WebResourceContext context, bool selectingVideo)
     {
         if (selectingVideo) return false;
         if (context == CoreWebView2WebResourceContext.Media) return true;
@@ -122,7 +122,7 @@ public partial class PlatformConnectionWindow
     }
     private string? _douyinStyleId;
 
-    private async Task<bool> TrySaveDouyinLoginAsync(bool authenticated, IReadOnlyList<WebsiteCookie> cookies)
+    internal async Task<bool> TrySaveDouyinLoginAsync(bool authenticated, IReadOnlyList<WebsiteCookie> cookies)
     {
         if (_closed || _savingSession || _sessionSaved || !authenticated || !cookies.Any(c =>
             c.Name is "sessionid" or "sessionid_ss" && !string.IsNullOrWhiteSpace(c.Value)

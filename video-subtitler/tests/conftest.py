@@ -16,3 +16,17 @@ def isolated_app_data(tmp_path, monkeypatch):
     monkeypatch.setattr(ytdlp_updater, "activate_vendored", lambda: None)
     monkeypatch.setattr(ytdlp_updater, "auto_update", lambda *_: None)
     monkeypatch.setattr(huggingface_hub, 'try_to_load_from_cache', lambda *a, **k: None)
+
+
+@pytest.fixture
+def pcm_file(tmp_path):
+    import wave
+
+    def make(seconds=1):
+        path = tmp_path / "fixture.wav"
+        with wave.open(str(path), "wb") as output:
+            output.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+            output.writeframes(b"\0\0" * (16000 * seconds))
+        return path
+
+    return make

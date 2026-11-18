@@ -1,9 +1,11 @@
 # 核心依赖
-yt-dlp>=2024.12.13        # 主下载引擎（站点失效时: pip install -U yt-dlp）
+yt-dlp[default]==2026.10.26  # 随包冻结已验证版本及匹配 EJS，应用内支持校验热更新
+curl-cffi==0.17.0          # 网页连接兼容，供上游提取器按需使用
+brotli>=1.2.1             # 与当前解析器发布包保持兼容
 PyYAML>=6.0
 requests>=2.31
 qrcode[pil]==8.2        # B 站应用内扫码；PNG 由 Pillow 本地生成
-faster-whisper>=1.0.3     # 本地语音识别（CTranslate2，无需 torch）
+faster-whisper==1.2.1      # 冻结包以经此版本验证的 FFmpeg 音频适配替代 PyAV
 ctranslate2==4.8.2        # 已验证的 CUDA 12 引擎，GPU 转写无需 cuDNN
 opencc-python-reimplemented>=0.1.7   # 中文输出繁→简归一化（纯 Python）
 

@@ -1,3 +1,5 @@
+from api_test_support import route_endpoint
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,24 +19,24 @@ def test_delete_excludes_a_retry_during_file_cleanup(monkeypatch, batch):
     from app.api import server
 
     app = server.create_app()
-    task = server._runner.create_task("https://example.test/video", "best", [], "none")
-    server._store.update_task(task["id"], status="failed")
+    task = app.state.runtime.runner.create_task("https://example.test/video", "best", [], "none")
+    app.state.runtime.store.update_task(task["id"], status="failed")
     claimed = []
-    list_artifacts = server._store.list_artifacts
+    list_artifacts = app.state.runtime.store.list_artifacts
 
     def overlapping_retry(tid):
-        claimed.append(server._store.claim_retry(tid))
+        claimed.append(app.state.runtime.store.claim_retry(tid))
         return list_artifacts(tid)
 
-    monkeypatch.setattr(server._store, "list_artifacts", overlapping_retry)
+    monkeypatch.setattr(app.state.runtime.store, "list_artifacts", overlapping_retry)
     if batch:
-        endpoint = next(r.endpoint for r in app.routes if r.path == "/api/v1/tasks/clear_done")
+        endpoint = route_endpoint(app, '/api/v1/tasks/clear_done')
         endpoint(server.ClearDoneIn(with_files=True))
     else:
-        endpoint = next(r.endpoint for r in app.routes if r.path == "/api/v1/tasks/{tid}" and "DELETE" in r.methods)
+        endpoint = route_endpoint(app, '/api/v1/tasks/{tid}', 'DELETE')
         endpoint(task["id"], with_files=True)
     assert claimed == [False], "retry must not acquire a task while its files are being deleted"
-    assert server._store.get_task(task["id"]) is None
+    assert app.state.runtime.store.get_task(task["id"]) is None
 
 
 def test_delete_keeps_file_still_registered_to_another_task(tmp_path):
@@ -45,20 +47,19 @@ def test_delete_keeps_file_still_registered_to_another_task(tmp_path):
     output.mkdir()
     video = output / "clip.mp4"
     video.write_bytes(b"shared old file")
-    tasks = [server._runner.create_task(f"https://example.test/{n}", "best", [],
+    tasks = [app.state.runtime.runner.create_task(f"https://example.test/{n}", "best", [],
                                         "none", output_dir=str(output)) for n in (1, 2)]
     for task in tasks:
-        server._store.update_task(task["id"], status="completed")
-        server._store.add_artifact(task["id"], "video", str(video))
+        app.state.runtime.store.update_task(task["id"], status="completed")
+        app.state.runtime.store.add_artifact(task["id"], "video", str(video))
 
-    endpoint = next(r.endpoint for r in app.routes
-                    if r.path == "/api/v1/tasks/{tid}" and "DELETE" in r.methods)
+    endpoint = route_endpoint(app, '/api/v1/tasks/{tid}', 'DELETE')
     result = endpoint(tasks[0]["id"], with_files=True)
 
     assert video.read_bytes() == b"shared old file"
     assert result["deleted_files"] == []
     assert result["skipped"]
-    assert server._store.get_task(tasks[1]["id"])
+    assert app.state.runtime.store.get_task(tasks[1]["id"])
 
 
 @pytest.mark.parametrize("category,removed", [
@@ -75,27 +76,26 @@ def test_partial_delete_keeps_record_and_other_category(tmp_path, monkeypatch, c
     app = server.create_app()
     output = tmp_path / "downloads"
     output.mkdir()
-    task = server._runner.create_task("https://example.test/clip", "best", [],
+    task = app.state.runtime.runner.create_task("https://example.test/clip", "best", [],
                                       "burn", output_dir=str(output))
-    server._store.update_task(task["id"], status="completed")
+    app.state.runtime.store.update_task(task["id"], status="completed")
     paths = {}
     for kind, suffix in (("video", ".source.mp4"), ("output", ".burned.mp4"),
                          ("subtitle", ".zh.srt"), ("bilingual", ".zh+en.srt")):
         path = output / ("clip" + suffix)
         path.write_text(kind, encoding="utf-8")
-        server._store.add_artifact(task["id"], kind, str(path))
+        app.state.runtime.store.add_artifact(task["id"], kind, str(path))
         paths[kind] = path
 
     if batch:
-        endpoint = next(r.endpoint for r in app.routes if r.path == "/api/v1/tasks/clear_done")
+        endpoint = route_endpoint(app, '/api/v1/tasks/clear_done')
         result = endpoint(server.ClearDoneIn(with_files=True, kind=category))
     else:
-        endpoint = next(r.endpoint for r in app.routes
-                        if r.path == "/api/v1/tasks/{tid}/artifacts" and "DELETE" in r.methods)
+        endpoint = route_endpoint(app, '/api/v1/tasks/{tid}/artifacts', 'DELETE')
         result = endpoint(task["id"], kind=category)
     assert len(result["deleted_files"]) == 2
-    assert server._store.get_task(task["id"])["status"] == "completed"
-    assert {a["kind"] for a in server._store.list_artifacts(task["id"])} == set(paths) - removed
+    assert app.state.runtime.store.get_task(task["id"])["status"] == "completed"
+    assert {a["kind"] for a in app.state.runtime.store.list_artifacts(task["id"])} == set(paths) - removed
     assert all(path.exists() == (kind not in removed) for kind, path in paths.items())
 
 
@@ -147,9 +147,9 @@ def test_simultaneous_retry_schedules_only_one_worker(monkeypatch):
     from app.api import server
 
     app = server.create_app()
-    task = server._runner.create_task("https://example.test/video", "best", [], "none")
-    server._store.update_task(task["id"], status="failed")
-    get_task = server._store.get_task
+    task = app.state.runtime.runner.create_task("https://example.test/video", "best", [], "none")
+    app.state.runtime.store.update_task(task["id"], status="failed")
+    get_task = app.state.runtime.store.get_task
     both_read = threading.Barrier(2)
 
     def overlapping_read(tid):
@@ -159,16 +159,9 @@ def test_simultaneous_retry_schedules_only_one_worker(monkeypatch):
 
     started = []
 
-    class DeferredThread:
-        def __init__(self, **kwargs):
-            self.args = kwargs["args"]
-
-        def start(self):
-            started.append(self.args)
-
-    monkeypatch.setattr(server._store, "get_task", overlapping_read)
-    monkeypatch.setattr(server, "threading", SimpleNamespace(Thread=DeferredThread))
-    retry = next(r.endpoint for r in app.routes if r.path == "/api/v1/tasks/{tid}/retry")
+    monkeypatch.setattr(app.state.runtime.store, "get_task", overlapping_read)
+    monkeypatch.setattr(app.state.runtime, "submit_job", lambda target, *args: started.append(args))
+    retry = route_endpoint(app, '/api/v1/tasks/{tid}/retry')
 
     def request(_):
         try:

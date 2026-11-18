@@ -12,7 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..core.errors import AppError, Codes
-from .transcriber import (Segment, Transcript, _join_speech_tokens, _timed_word_segments,
+from .speech_text import (Segment, Transcript, _join_speech_tokens, _timed_word_segments,
                           normalize_asr_language, write_json_atomic)
 
 log = logging.getLogger(__name__)

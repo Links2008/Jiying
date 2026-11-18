@@ -34,6 +34,8 @@ def normalize_media_url(value: str) -> str:
     if url.lower().startswith("www."):
         url = "https://" + url
     parts = urlsplit(url)
+    if (parts.hostname or "").lower() in {"bilibili.com", "www.bilibili.com", "m.bilibili.com"} and parts.path.startswith("/video/"):
+        return urlunsplit(("https", "www.bilibili.com", parts.path, parts.query, ""))
     if parts.scheme == "http" and (parts.hostname or "").lower() in {
             "xiaohongshu.com", "www.xiaohongshu.com", "m.xiaohongshu.com", "xhslink.com", "www.xhslink.com"}:
         url = urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))

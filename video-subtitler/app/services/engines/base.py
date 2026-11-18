@@ -57,6 +57,7 @@ class DirectTarget:
     headers: dict = field(default_factory=dict)
     kind: str = "merged"     # merged | video | audio（拆流下载时使用）
     duration: float = 0.0    # 来源声明的完整时长，直链完成后用于校验
+    filesize: int = 0        # 聚合双流进度的权重；未知时由下载器保守估算。
 
 
 @dataclass

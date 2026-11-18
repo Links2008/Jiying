@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Jiying.Desktop;
@@ -11,10 +10,8 @@ internal static class EngineDiscoveryRegression
 {
     internal static async Task Run(MainWindow window, Action<bool, string> check)
     {
-        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        var engine = typeof(MainWindow).GetField("_engine", flags)!.GetValue(window)!;
-        var type = engine.GetType();
-        var path = (string)type.GetProperty("EnginePath")!.GetValue(engine)!;
+        var engine = window.Engine;
+                var path = engine.EnginePath;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var waiting = new TcpListener(IPAddress.Loopback, 0);
         var ready = new TcpListener(IPAddress.Loopback, 0);
@@ -45,7 +42,7 @@ internal static class EngineDiscoveryRegression
         try
         {
             var timer = Stopwatch.StartNew();
-            var find = (Task<int?>)type.GetMethod("FindEngineAsync", flags)!.Invoke(engine, [timeout.Token, null, new[] { waitingPort, foreignPort, readyPort }])!;
+            var find = engine.FindEngineAsync(timeout.Token, null, new[] { waitingPort, foreignPort, readyPort });
             var found = await find;
             var elapsed = timer.Elapsed.TotalMilliseconds;
             check(found == readyPort, "较早响应的其他目录引擎不能抢占连接");
@@ -58,7 +55,7 @@ internal static class EngineDiscoveryRegression
             var cancellationObserved = false;
             try
             {
-                await (Task<int?>)type.GetMethod("FindEngineAsync", flags)!.Invoke(engine, [cancel.Token, null, new[] { waitingPort }])!;
+                await engine.FindEngineAsync(cancel.Token, null, new[] { waitingPort });
             }
             catch (OperationCanceledException) { cancellationObserved = true; }
             check(cancellationObserved, "调用方取消后停止发现，不继续等待或建立连接");

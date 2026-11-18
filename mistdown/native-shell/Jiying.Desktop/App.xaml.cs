@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Globalization;
 using System.Windows;
 using System.IO;
 using System.Text.Json;
@@ -15,14 +16,34 @@ public partial class App : Application
     private EventWaitHandle? _activate;
     private EventWaitHandle? _activateCompleted;
     private CancellationTokenSource? _listenerStop;
+    private Task? _listener;
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        DispatcherUnhandledException += (_, args) => DesktopDiagnostics.Write("界面未处理异常", args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception error) DesktopDiagnostics.Write("进程未处理异常", error);
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            DesktopDiagnostics.Write("后台任务异常", args.Exception.GetBaseException());
+            args.SetObserved();
+        };
         base.OnStartup(e);
         if (e.Args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
         {
-            try { SelfCheck.Run(); Shutdown(0); }
-            catch { Shutdown(1); }
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+                SelfCheck.Run();
+                Shutdown(0);
+            }
+            catch (Exception error)
+            {
+                DesktopDiagnostics.Write("桌面程序自检", error);
+                Shutdown(1);
+            }
             return;
         }
         if (e.Args.Length == 3 && e.Args[0] == "--completion-notify")
@@ -77,7 +98,8 @@ public partial class App : Application
         _activate = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateName);
         _activateCompleted = new EventWaitHandle(false, EventResetMode.AutoReset, CompletedActivateName);
         _listenerStop = new CancellationTokenSource();
-        _ = Task.Run(() => ListenForActivation(_listenerStop.Token));
+        var token = _listenerStop.Token;
+        _listener = Task.Run(() => ListenForActivation(token));
 
         MainWindow = new MainWindow();
         MainWindow.Show();
@@ -100,29 +122,38 @@ public partial class App : Application
 
     private void ListenForActivation(CancellationToken token)
     {
-        while (!token.IsCancellationRequested && _activate is not null && _activateCompleted is not null)
+        try
         {
-            var signal = WaitHandle.WaitAny([_activate, _activateCompleted], 500);
-            if (signal == WaitHandle.WaitTimeout) continue;
-            Dispatcher.Invoke(() =>
+            WaitHandle[] signals = [token.WaitHandle, _activate!, _activateCompleted!];
+            while (!token.IsCancellationRequested)
             {
-                if (MainWindow is null) return;
-                if (MainWindow.WindowState == WindowState.Minimized)
-                    SystemCommands.RestoreWindow(MainWindow);
-                MainWindow.Show();
-                if (signal == 1) ((MainWindow)MainWindow).ShowCompleted();
-                MainWindow.Activate();
-                MainWindow.Topmost = true;
-                MainWindow.Topmost = false;
-            });
+                var signal = WaitHandle.WaitAny(signals);
+                if (signal == 0) return;
+                Dispatcher.InvokeAsync(() => ActivateWindow(signal == 2),
+                    System.Windows.Threading.DispatcherPriority.Normal, token);
+            }
         }
+        catch (Exception error) { DesktopDiagnostics.Write("窗口激活监听", error); }
+    }
+
+    private void ActivateWindow(bool showCompleted)
+    {
+        if (MainWindow is not MainWindow window) return;
+        if (window.WindowState == WindowState.Minimized) SystemCommands.RestoreWindow(window);
+        window.Show();
+        if (showCompleted) window.ShowCompleted();
+        window.Activate();
+        window.Topmost = true;
+        window.Topmost = false;
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         _listenerStop?.Cancel();
+        _listener?.GetAwaiter().GetResult();
         _activate?.Dispose();
         _activateCompleted?.Dispose();
+        _listenerStop?.Dispose();
         _mutex?.Dispose();
         base.OnExit(e);
     }

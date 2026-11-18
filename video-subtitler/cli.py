@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
+from app import __version__
 from app.core.config import load_config
 from app.core.errors import AppError
 from app.core.logging import setup_logging
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         epilog=__doc__.split("用法：")[-1],
     )
     parser.add_argument("url", nargs="?", help="视频页面链接")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("-r", "--resolution",
                         help="分辨率：best / 1080p / --list-formats 中的 format_id")
     parser.add_argument("--langs", default="zh",
@@ -67,53 +70,56 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     if args.model:
         config.set("transcriber.model", args.model)
-    store = Store(data_dir() / "tasks.db")
-    router = EngineRouter(config, store)
+    with ExitStack() as lifetime:
+        store = Store(data_dir() / "tasks.db")
+        lifetime.callback(store.close)
+        router = EngineRouter(config, store)
 
-    if not args.url:
-        parser.print_help()
-        print("\n未提供链接。示例：python cli.py \"https://...\" --list-formats")
-        return 0
-
-    # 两阶段交互第一步：探测（缓存 24h，同链接秒回）
-    try:
-        engine, result = router.probe(args.url)
-    except AppError as e:
-        print(f"✗ 探测失败 [{e.code}] {e.message}", file=sys.stderr)
-        if e.suggestion:
-            print(f"  建议：{e.suggestion}", file=sys.stderr)
-        return 1
-    if args.list_formats or not args.resolution:
-        print(f"标题：{result.title}")
-        print(f"时长：{_fmt_dur(result.duration)}    引擎：{engine.name}")
-        print("可用分辨率：")
-        _print_formats(result)
-        if not args.resolution:
-            print("\n→ 加 -r <format_id> 或 -r best / -r 1080p 开始下载")
+        if not args.url:
+            parser.print_help()
+            print("\n未提供链接。示例：python cli.py \"https://...\" --list-formats")
             return 0
+
+        # 两阶段交互第一步：探测（缓存 24h，同链接秒回）
+        try:
+            engine, result = router.probe(args.url)
+        except AppError as e:
+            print(f"✗ 探测失败 [{e.code}] {e.message}", file=sys.stderr)
+            if e.suggestion:
+                print(f"  建议：{e.suggestion}", file=sys.stderr)
+            return 1
+        if args.list_formats or not args.resolution:
+            print(f"标题：{result.title}")
+            print(f"时长：{_fmt_dur(result.duration)}    引擎：{engine.name}")
+            print("可用分辨率：")
+            _print_formats(result)
+            if not args.resolution:
+                print("\n→ 加 -r <format_id> 或 -r best / -r 1080p 开始下载")
+                return 0
+            return 0
+
+        langs = [l.strip() for l in args.langs.split(",") if l.strip()]
+        runner = PipelineRunner(config, store)
+        lifetime.callback(runner.close)
+        mode = "burn" if args.burn else "softmux"
+        task = runner.create_task(args.url, args.resolution, langs, mode, title=result.title)
+        print(f"任务 {task['id']} 开始：{result.title} @ {args.resolution} "
+              f"({'烧录' if args.burn else '软封装'}, 字幕语言 {args.langs})")
+
+        try:
+            task = runner.run(task)
+        except AppError as e:
+            print(f"\n✗ 任务失败 [{e.code}] {e.message}", file=sys.stderr)
+            if e.suggestion:
+                print(f"  建议：{e.suggestion}", file=sys.stderr)
+            return 1
+
+        print("\n✓ 完成，产物：")
+        for a in store.list_artifacts(task["id"]):
+            p = Path(a["path"])
+            size = f"  ({_fmt_size(p.stat().st_size)})" if p.exists() else ""
+            print(f"  [{a['kind']:<8}] {p}{size}")
         return 0
-
-    langs = [l.strip() for l in args.langs.split(",") if l.strip()]
-    runner = PipelineRunner(config, store)
-    mode = "burn" if args.burn else "softmux"
-    task = runner.create_task(args.url, args.resolution, langs, mode, title=result.title)
-    print(f"任务 {task['id']} 开始：{result.title} @ {args.resolution} "
-          f"({'烧录' if args.burn else '软封装'}, 字幕语言 {args.langs})")
-
-    try:
-        task = runner.run(task)
-    except AppError as e:
-        print(f"\n✗ 任务失败 [{e.code}] {e.message}", file=sys.stderr)
-        if e.suggestion:
-            print(f"  建议：{e.suggestion}", file=sys.stderr)
-        return 1
-
-    print("\n✓ 完成，产物：")
-    for a in store.list_artifacts(task["id"]):
-        p = Path(a["path"])
-        size = f"  ({_fmt_size(p.stat().st_size)})" if p.exists() else ""
-        print(f"  [{a['kind']:<8}] {p}{size}")
-    return 0
 
 
 if __name__ == "__main__":

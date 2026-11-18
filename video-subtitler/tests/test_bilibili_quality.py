@@ -28,6 +28,9 @@ def fake_ytdlp(monkeypatch, formats=(), session=False, error=""):
                 raise DownloadError(error)
             return {"id": "sample", "title": "sample", "formats": list(formats)}
 
+        def add_info_extractor(self, extractor):
+            assert extractor.ie_key() == 'BiliBili'
+
     monkeypatch.setattr(ytdlp_engine, "_import_ytdlp", lambda: SimpleNamespace(
         YoutubeDL=YoutubeDL, utils=SimpleNamespace(DownloadError=DownloadError)))
 
@@ -61,7 +64,7 @@ def test_auth_status_requires_bilibili_session_cookie(monkeypatch, configured, s
     cfg = Config({"cookies_from_browser": "edge" if configured else ""})
     result = ytdlp_engine.YtDlpEngine(cfg).probe("https://www.bilibili.com/video/sample")
     assert result.auth_status == expected
-    assert "4K" in result.quality_notice
+    assert "1080p" in result.quality_notice and "4K" not in result.quality_notice
     assert "test-session" not in result.quality_notice
 
 
@@ -72,10 +75,9 @@ def test_auth_failure_gives_in_app_recovery(monkeypatch, message):
     with pytest.raises(AppError) as caught:
         ytdlp_engine.YtDlpEngine(Config({})).probe("https://www.bilibili.com/video/sample")
     assert caught.value.code == Codes.AUTH_NEED_COOKIES
-    assert "登录态" in caught.value.message
-    assert "刷新画质" in caught.value.suggestion
-    assert "连接 B 站" in caught.value.suggestion and "扫码登录" in caught.value.suggestion
-    assert "自动刷新画质" in caught.value.suggestion
+    assert "账号" in caught.value.message
+    assert "连接 B 站" in caught.value.suggestion and "扫码" in caught.value.suggestion
+    assert "自动继续解析" in caught.value.suggestion
     assert "config.yaml" not in caught.value.suggestion
     assert "pip" not in caught.value.suggestion
 
@@ -89,13 +91,20 @@ def test_missing_cookie_file_keeps_public_formats_available(monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize("browser", ["", "edge"])
-def test_missing_4k_login_notice_prefers_scan_and_automatic_refresh(monkeypatch, browser):
+def test_public_quality_notice_is_short_and_does_not_require_login(monkeypatch, browser):
     fake_ytdlp(monkeypatch, [dict(video("1080"), height=1080)])
     result = ytdlp_engine.YtDlpEngine(Config({"cookies_from_browser": browser})).probe(
         "https://www.bilibili.com/video/sample")
-    assert "连接 B 站" in result.quality_notice
-    assert "扫码登录" in result.quality_notice and "自动刷新画质" in result.quality_notice
-    assert result.quality_notice.index("扫码登录") < result.quality_notice.index("浏览器")
+    assert "1080p" in result.quality_notice and "可直接下载" in result.quality_notice
+    assert "浏览器" not in result.quality_notice and "Cookie" not in result.quality_notice
+    assert len(result.quality_notice) < 40
+
+
+def test_unknown_resolution_does_not_claim_4k(monkeypatch):
+    fake_ytdlp(monkeypatch, [], session=True)
+    result = ytdlp_engine.YtDlpEngine(Config({"cookies_from_browser": "edge"})).probe(
+        "https://www.bilibili.com/video/sample")
+    assert "4K" not in result.quality_notice
 
 
 def test_expired_selected_format_requests_quality_refresh(monkeypatch, tmp_path):

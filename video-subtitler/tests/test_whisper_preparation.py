@@ -7,7 +7,7 @@ import pytest
 
 from app.core.config import Config
 from app.core.errors import AppError, Codes
-from app.services import transcriber as tc
+from app.services import transcriber as tc, whisper_models
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def prepared(monkeypatch, tmp_path):
     return worker, tmp_path
 
 
-def test_first_transcription_reports_download_and_load(monkeypatch, prepared):
+def test_first_transcription_reports_download_and_load(monkeypatch, prepared, pcm_file):
     worker, tmp_path = prepared
     seen = []
     def download(config, model, **kw):
@@ -35,7 +35,7 @@ def test_first_transcription_reports_download_and_load(monkeypatch, prepared):
             bar.close()
         return tmp_path
     monkeypatch.setattr(tc, "download_whisper_model", download)
-    transcript = worker.transcribe(tmp_path / "audio.wav", on_progress=lambda f, n: seen.append((f, n)))
+    transcript = worker.transcribe(pcm_file(), on_progress=lambda f, n: seen.append((f, n)))
     assert transcript.segments[0].text == "hello"
     assert any("国内" in note for _, note in seen)
     assert any("50%" in note for _, note in seen)
@@ -49,16 +49,16 @@ def test_cancelled_download_is_not_retried(monkeypatch):
     from faster_whisper import utils
     calls = []
     monkeypatch.setattr(utils, "download_model", lambda *a, **k: (_ for _ in ()).throw(OSError()))
-    monkeypatch.setattr(tc, "_configure_whisper_http", lambda cfg: None)
+    monkeypatch.setattr(whisper_models, "_configure_whisper_http", lambda cfg: None)
     def cancelled(*a, **k):
         calls.append(k)
         raise AppError(Codes.TASK_CANCELLED, "任务已取消")
     monkeypatch.setattr(huggingface_hub, "snapshot_download", cancelled)
     with pytest.raises(AppError) as err:
-        tc.download_whisper_model(Config({}), "custom/model", check_cancel=lambda: None)
+        whisper_models.download_whisper_model(Config({}), "custom/model", check_cancel=lambda: None)
     assert err.value.code == Codes.TASK_CANCELLED
     assert len(calls) == 1
-    assert not tc._whisper_download_lock.locked()
+    assert not whisper_models._whisper_download_lock.locked()
 
 
 def test_progress_cancel_is_not_swallowed():

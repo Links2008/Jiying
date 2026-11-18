@@ -1,6 +1,7 @@
 """转写结果归一化测试：中文繁→简（OpenCC 可选依赖）。"""
 import pytest
 
+from app.services import speech_cuda
 from app.services.transcriber import Segment, Transcript
 
 
@@ -28,7 +29,7 @@ def test_zh_without_opencc_falls_back():
 
 
 @pytest.mark.parametrize("action", ["preload", "transcribe"])
-def test_missing_cuda_library_falls_back_to_cpu(monkeypatch, tmp_path, action):
+def test_missing_cuda_library_falls_back_to_cpu(monkeypatch, tmp_path, pcm_file, action):
     from types import SimpleNamespace
     import faster_whisper
     from app.core.config import Config
@@ -54,7 +55,7 @@ def test_missing_cuda_library_falls_back_to_cpu(monkeypatch, tmp_path, action):
     if action == "preload":
         assert t.preload("tiny") == "tiny"
     else:
-        assert t.transcribe(tmp_path / "fake.wav").segments[0].text == "ok"
+        assert t.transcribe(pcm_file()).segments[0].text == "ok"
     assert calls == [("cuda", "int8_float16"), ("cpu", "int8")]
     assert t._cuda_broken
     t.preload("tiny")
@@ -112,15 +113,15 @@ def test_bundled_cuda_directory_keeps_handle_and_process_search_path(monkeypatch
     runtime.mkdir()
     handle = object()
     calls = []
-    monkeypatch.setattr(tc, "bin_dir", lambda: tmp_path, raising=False)
-    monkeypatch.setattr(tc, "_cuda_dll_handles", {}, raising=False)
+    monkeypatch.setattr(speech_cuda, "bin_dir", lambda: tmp_path, raising=False)
+    monkeypatch.setattr(speech_cuda, "_cuda_dll_handles", {}, raising=False)
     monkeypatch.setattr(sys, "path", [])
     monkeypatch.setenv("PATH", "existing-path")
     monkeypatch.setattr(os, "add_dll_directory", lambda path: calls.append(path) or handle)
-    tc._add_nvidia_dll_dirs()
-    tc._add_nvidia_dll_dirs()
+    speech_cuda._add_nvidia_dll_dirs()
+    speech_cuda._add_nvidia_dll_dirs()
     assert calls == [str(runtime)]
-    assert tc._cuda_dll_handles[str(runtime)] is handle
+    assert speech_cuda._cuda_dll_handles[str(runtime)] is handle
     assert os.environ["PATH"].split(os.pathsep) == [str(runtime), "existing-path"]
 
 
@@ -145,9 +146,9 @@ def test_compressed_cuda_is_restored_before_native_registration(monkeypatch, tmp
                         "sha256": hashlib.sha256(data).hexdigest(),
                         "archive_sha256": hashlib.sha256(packed).hexdigest()})
     (bundle / "runtime.json").write_text(json.dumps({"files": records}), encoding="utf-8")
-    monkeypatch.setattr(tc, "bin_dir", lambda: tmp_path / "bin")
-    monkeypatch.setattr(tc, "data_dir", lambda: tmp_path / "data")
-    monkeypatch.setattr(tc, "_cuda_dll_handles", {})
+    monkeypatch.setattr(speech_cuda, "bin_dir", lambda: tmp_path / "bin")
+    monkeypatch.setattr(speech_cuda, "data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr(speech_cuda, "_cuda_dll_handles", {})
     monkeypatch.setattr(sys, "path", [])
     monkeypatch.setenv("PATH", "existing")
     registered = []
@@ -160,7 +161,7 @@ def test_compressed_cuda_is_restored_before_native_registration(monkeypatch, tmp
 
     monkeypatch.setattr(os, "add_dll_directory", register)
     statuses = []
-    tc._add_nvidia_dll_dirs(on_status=statuses.append)
-    tc._add_nvidia_dll_dirs()
+    speech_cuda._add_nvidia_dll_dirs(on_status=statuses.append)
+    speech_cuda._add_nvidia_dll_dirs()
     assert len(registered) == 1 and statuses
     assert registered[0].startswith(str(tmp_path / "data" / "cache" / "cuda"))

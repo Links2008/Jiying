@@ -24,13 +24,13 @@ def cookie(**changes):
 
 def test_connect_keeps_bilibili_settings_and_hides_credentials():
     with TestClient(server.create_app()) as client:
-        server._config.raw.update(cookies='preserved-bilibili.txt', cookies_from_browser='')
+        client.app.state.runtime.config.raw.update(cookies='preserved-bilibili.txt', cookies_from_browser='')
         response = client.post('/api/v1/platform/session', headers=HOST,
                                json={'platform': 'xiaohongshu', 'cookies': [cookie()]})
         assert response.status_code == 200
         assert response.json() == {'ok': True}
         assert SECRET not in response.text
-        assert server._config.get('cookies') == 'preserved-bilibili.txt'
+        assert client.app.state.runtime.config.get('cookies') == 'preserved-bilibili.txt'
         jar = MozillaCookieJar(str(data_dir() / 'platform-sessions/xiaohongshu.txt'))
         jar.load(ignore_discard=True)
         assert [(c.name, c.value) for c in jar] == [('web_session', SECRET)]

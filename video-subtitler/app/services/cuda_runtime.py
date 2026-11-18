@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import lzma
 import os
@@ -40,10 +41,9 @@ def _valid(path, record, check_cancel):
 @contextmanager
 def _runtime_lock(path, check_cancel):
     """A process crash releases the OS lock; no stale lock directory remains."""
-    with path.open('a+b') as handle:
-        if not path.stat().st_size:
-            handle.write(b'\0')
-            handle.flush()
+    # Windows 字节锁可覆盖文件尾之后的区域。锁文件本身不写入，
+    # 等待者就不会对持锁进程的字节范围执行 flush。
+    with path.open('a+b', buffering=0) as handle:
         if os.name == 'nt':
             import msvcrt
 
@@ -69,7 +69,9 @@ def _runtime_lock(path, check_cancel):
                 acquire()
                 break
             except OSError as exc:
-                if exc.errno not in (11, 13, 35, 36) or time.monotonic() >= deadline:
+                if exc.errno not in (errno.EAGAIN, errno.EACCES, errno.EDEADLK):
+                    raise
+                if time.monotonic() >= deadline:
                     raise RuntimeError('等待随包 CUDA 库还原超时，请重试') from exc
                 time.sleep(0.05)
         try:

@@ -42,7 +42,7 @@ def test_translation_stage_reports_real_progress(tmp_path, monkeypatch):
             on_progress(1.0)
             return ["译文" for _ in texts]
 
-    monkeypatch.setattr("app.pipeline.runner.build_translator",
+    monkeypatch.setattr("app.pipeline.translation.build_translator",
                         lambda *_: Translator())
     transcript = SimpleNamespace(language="en", segments=[
         SimpleNamespace(start=0, end=1, text="hello")])
@@ -100,7 +100,9 @@ def test_selected_format_downloads_one_playlist_entry(tmp_path, monkeypatch, for
     monkeypatch.setattr(engine, "_find_aria2c", lambda: None)
     assert engine.download("https://example.test/playlist", format_id, tmp_path) == [media]
     assert opts[0]["playlist_items"] == "1"
-    assert opts[0]["format"] == f"{format_id}[acodec=none]+ba/{format_id}"
+    chosen = {"format_id": format_id, "height": 1080, "vcodec": "h264", "acodec": "aac"}
+    higher = {**chosen, "format_id": "higher", "height": 2160}
+    assert list(opts[0]["format"]({"formats": [chosen, higher]})) == [chosen]
     assert not opts[0].get("writesubtitles")
 
 

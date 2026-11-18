@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" IgnorableNamespaces="uap uap10 rescap">
+  <Identity Name="Linkshub.402490C349CF4" Publisher="CN=EFC3C12B-EDE4-43C2-B238-A9722257C4E1" Version="1.1.48.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>即影</DisplayName>
+    <PublisherDisplayName>Linkshub</PublisherDisplayName>
+    <Description>即影视频下载与字幕工具</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Resources>
+    <Resource Language="zh-CN" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Applications>
+    <Application Id="Jiying" Executable="Jiying.Native.exe" uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+      <uap:VisualElements DisplayName="即影" Description="视频下载、字幕识别与多语言翻译" BackgroundColor="#3154F5" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+</Package>

@@ -6,7 +6,7 @@ import pytest
 
 from app.core.config import Config
 from app.core.errors import AppError, Codes
-from app.services import transcriber as tc
+from app.services import whisper_models as tc
 
 
 class Response:

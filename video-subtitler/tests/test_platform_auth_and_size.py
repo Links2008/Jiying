@@ -31,6 +31,9 @@ def fake_engine(monkeypatch, tmp_path, formats, cookie_error=False, remote_error
         def __exit__(self, *_):
             pass
 
+        def add_info_extractor(self, extractor):
+            assert extractor.ie_key() == 'BiliBili'
+
         def extract_info(self, url, download):
             extracted.append((download, bool(self.options.get("cookiesfrombrowser") or self.options.get("cookiefile"))))
             if remote_error:
@@ -239,7 +242,7 @@ def test_probe_api_preserves_size_certainty(monkeypatch, size, estimated):
     result = ProbeResult(video_id="offline", title="offline", formats=[FormatInfo(
         format_id="video", label="1080p", filesize=size, size_is_estimate=estimated)])
     with TestClient(server.create_app()) as client:
-        monkeypatch.setattr(server._router, "probe", lambda *_, **__: (SimpleNamespace(name="test"), result))
+        monkeypatch.setattr(client.app.state.runtime.router, "probe", lambda *_, **__: (SimpleNamespace(name="test"), result))
         response = client.post("/api/v1/probe", json={"url": "https://offline.test/video"},
                                headers={"Host": "127.0.0.1:8766"})
     assert response.status_code == 200
