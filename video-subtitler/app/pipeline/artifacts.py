@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from ..core import cancel as task_cancel
+from ..core.paths import replace_with_retry
 from ..core.errors import AppError
 from .resources import publication_slot
 
@@ -124,10 +125,13 @@ class TaskArtifacts:
             if source.resolve() != final.resolve():
                 task_cancel.raise_if_cancelled(tid)
                 shared_source = self._store.artifact_owned_by_other(tid, str(source))
+                def check_cancelled():
+                    task_cancel.raise_if_cancelled(tid)
+
                 copy_required = shared_source
                 if not shared_source:
                     try:
-                        os.replace(source, final)
+                        replace_with_retry(source, final, before_retry=check_cancelled)
                     except OSError as exc:
                         if exc.errno != errno.EXDEV:
                             raise
@@ -150,7 +154,7 @@ class TaskArtifacts:
                             os.fsync(staging.fileno())
                         shutil.copystat(source, temporary)
                         task_cancel.raise_if_cancelled(tid)
-                        os.replace(temporary, final)
+                        replace_with_retry(temporary, final, before_retry=check_cancelled)
                         if not shared_source:
                             try:
                                 source.unlink()

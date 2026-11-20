@@ -3,9 +3,27 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 APP_NAME = "VideoSubtitler"
+
+
+def replace_with_retry(source: Path, target: Path, *, before_retry=None) -> None:
+    """仅对 Windows 临时共享冲突重试，保留原子替换及原始错误。"""
+    for delay in (0.05, 0.1, 0.2, None):
+        try:
+            os.replace(source, target)
+            return
+        except OSError as error:
+            code = getattr(error, "winerror", None)
+            # Windows 替换已打开的普通文件也可能返回 5；只对可写的已有目标短暂重试。
+            sharing_conflict = code in (32, 33) or (code == 5 and target.is_file() and os.access(target, os.W_OK))
+            if delay is None or not sharing_conflict:
+                raise
+            time.sleep(delay)
+            if before_retry is not None:
+                before_retry()
 
 
 def app_root() -> Path:

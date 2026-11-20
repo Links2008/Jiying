@@ -137,3 +137,117 @@ def test_completed_partial_weight_counts_toward_full_progress(domestic):
     seen = []
     tc._download_modelscope(Config({}), "tiny", tqdm_class=tc.whisper_progress_tqdm(seen.append))
     assert seen[-1] == 0.99
+
+
+
+@pytest.mark.parametrize("invalid", ["bytes 4-120/13", "bytes 4-12/99", "bytes 4-2/13"])
+def test_invalid_range_never_commits(domestic, invalid):
+    from unittest.mock import Mock
+    files, meta, _, folder = domestic
+    folder.mkdir()
+    weight = meta[0]
+    data = files["model.bin"]
+    part = folder / f"model.bin.{weight['Sha256'][:12]}.part"
+    part.write_bytes(data[:4])
+    session = Mock()
+    session.get.return_value = Response(data[4:], status=206, headers={"Content-Range": invalid})
+    with pytest.raises(OSError):
+        tc._download_modelscope_file(session, "repo", folder, weight)
+    assert part.read_bytes() == data[:4]
+    assert not (folder / "model.bin").exists()
+
+
+def test_oversized_response_stops_before_filling_disk(domestic):
+    from unittest.mock import Mock
+    _, meta, _, folder = domestic
+    folder.mkdir()
+    session = Mock()
+    session.get.return_value = Response(b"x" * 32)
+    with pytest.raises(OSError):
+        tc._download_modelscope_file(session, "repo", folder, meta[0])
+    assert all(p.stat().st_size <= meta[0]["Size"] for p in folder.glob("*.part"))
+    assert not (folder / "model.bin").exists()
+
+
+def test_rejected_range_retries_full_without_losing_prior_target(domestic):
+    from unittest.mock import Mock
+    files, meta, _, folder = domestic
+    folder.mkdir()
+    weight = meta[0]
+    part = folder / f"model.bin.{weight['Sha256'][:12]}.part"
+    part.write_bytes(b"mode")
+    session = Mock()
+    session.get.side_effect = [Response(status=416), Response(files["model.bin"])]
+    tc._download_modelscope_file(session, "repo", folder, weight)
+    assert [c.kwargs["headers"] for c in session.get.call_args_list] == [{"Range": "bytes=4-"}, {}]
+    assert (folder / "model.bin").read_bytes() == files["model.bin"]
+
+
+def test_failed_full_request_preserves_prefix(domestic):
+    from unittest.mock import Mock
+    files, meta, _, folder = domestic
+    folder.mkdir()
+    weight = meta[0]
+    part = folder / f"model.bin.{weight['Sha256'][:12]}.part"
+    part.write_bytes(files["model.bin"][:4])
+    old = folder / "model.bin"
+    old.write_bytes(b"previous file")
+    session = Mock()
+    session.get.side_effect = [Response(status=416), Response(status=503)]
+    with pytest.raises(OSError, match="503"):
+        tc._download_modelscope_file(session, "repo", folder, weight)
+    assert session.get.call_count == 2
+    assert part.read_bytes() == files["model.bin"][:4]
+    assert old.read_bytes() == b"previous file"
+
+
+
+@pytest.mark.parametrize("locked,cache", [("model.bin", False), ("model.bin", True), ("download.json", False)])
+def test_model_commit_recovers_from_transient_lock(monkeypatch, domestic, locked, cache):
+    from pathlib import Path
+    import os
+
+    files, meta, calls, folder = domestic
+    folder.mkdir()
+    weight = meta[0]
+    if cache:
+        (folder / f"model.bin.{weight['Sha256'][:12]}.part").write_bytes(files["model.bin"])
+    original = os.replace
+    attempts = []
+    def occupied_once(src, dst):
+        if Path(dst).name == locked:
+            attempts.append(dst)
+            if len(attempts) == 1:
+                exc = PermissionError("模型文件被短暂占用")
+                exc.winerror = 32
+                raise exc
+        return original(src, dst)
+    monkeypatch.setattr(os, "replace", occupied_once)
+    assert tc._download_modelscope(Config({}), "tiny") == folder
+    assert len(attempts) == 2
+    assert sum(kw["params"].get("FilePath") == "model.bin" for _, kw in calls) == (0 if cache else 1)
+    assert (folder / "model.bin").read_bytes() == files["model.bin"]
+    assert json.loads((folder / "download.json").read_bytes())["model.bin"] == len(files["model.bin"])
+
+
+@pytest.mark.parametrize("failure", ["empty", "oversize", "disconnect"])
+def test_full_response_without_usable_first_chunk_keeps_prefix(domestic, failure):
+    from unittest.mock import Mock
+
+    _, meta, _, folder = domestic
+    folder.mkdir()
+    weight = meta[0]
+    part = folder / f"model.bin.{weight['Sha256'][:12]}.part"
+    part.write_bytes(b"mode")
+    response = Response()
+    if failure == "oversize":
+        response.iter_content = lambda **kwargs: iter([b"x" * (weight["Size"] + 1)])
+    elif failure == "disconnect":
+        def interrupted(**kwargs):
+            raise OSError("连接中断")
+        response.iter_content = interrupted
+    session = Mock()
+    session.get.return_value = response
+    with pytest.raises(OSError):
+        tc._download_modelscope_file(session, "repo", folder, weight)
+    assert part.read_bytes() == b"mode"

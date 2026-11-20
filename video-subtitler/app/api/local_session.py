@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ..core import windows_data
+from ..core.paths import replace_with_retry
 
 
 def _state_dir() -> Path:
@@ -38,7 +39,19 @@ def windows_session(engine_root: Path, port: int):
             json.dump(descriptor, handle)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, target)
+        try:
+            replace_with_retry(temporary, target)
+        except OSError as error:
+            if getattr(error, "winerror", None) != 17:
+                raise
+            # 某些 Windows 环境会拒绝同目录重命名。外层引擎锁保证单写者，
+            # 桌面端会重试尚未写全的登记，并核对进程和加密凭据。
+            payload = temporary.read_bytes()
+            target.unlink(missing_ok=True)
+            with target.open("xb") as output:
+                output.write(payload)
+                output.flush()
+                os.fsync(output.fileno())
         yield token
     finally:
         if temporary is not None:

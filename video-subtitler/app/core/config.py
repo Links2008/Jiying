@@ -196,7 +196,7 @@ def _write_mapping(target: Path, data: dict) -> None:
             file.write(text)
             file.flush()
             os.fsync(file.fileno())
-        os.replace(temporary, target)
+        _paths.replace_with_retry(temporary, target)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

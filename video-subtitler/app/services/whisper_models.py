@@ -5,12 +5,14 @@ import fnmatch
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from ..core.errors import AppError, Codes
+from ..core.paths import replace_with_retry
 
 log = logging.getLogger(__name__)
 
@@ -211,7 +213,7 @@ def _download_modelscope_file(session, repo: str, path: Path, info: dict,
         return
     offset = part.stat().st_size if part.is_file() else 0
     if offset == size and _model_file_hash(part, check_cancel) == expected:
-        part.replace(target)
+        replace_with_retry(part, target, before_retry=check_cancel)
         if tqdm_class:
             with tqdm_class(total=size, initial=size, unit="B", desc=f"ModelScope {name}") as bar:
                 bar.update(0)
@@ -225,33 +227,63 @@ def _download_modelscope_file(session, repo: str, path: Path, info: dict,
                 if check_cancel:
                     check_cancel()
                 digest.update(chunk)
-    headers = {"Range": f"bytes={offset}-"} if offset else {}
     bar = tqdm_class(total=size, initial=offset, unit="B", desc=f"ModelScope {name}") if tqdm_class else None
     try:
-        with session.get(f"https://modelscope.cn/api/v1/models/{repo}/repo",
-                         params={"Revision": info["Revision"], "FilePath": name},
-                         headers=headers, stream=True, timeout=(10, 30)) as response:
-            response.raise_for_status()
-            if offset and response.status_code == 200:
-                offset, digest = 0, hashlib.sha256()
-                if bar:
-                    bar.n = 0
-            elif response.status_code == 206 and not response.headers.get("Content-Range", "").startswith(f"bytes {offset}-"):
-                raise OSError("模型续传范围不匹配")
-            with part.open("ab" if offset else "wb", buffering=0) as file:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if check_cancel:
-                        check_cancel()
-                    if chunk:
+        # 国内源可能拒绝 Range。只回退一次，收到有效的完整响应后才覆盖分片。
+        for start in ([offset, 0] if offset else [0]):
+            if check_cancel:
+                check_cancel()
+            headers = {"Range": f"bytes={start}-"} if start else {}
+            with session.get(f"https://modelscope.cn/api/v1/models/{repo}/repo",
+                             params={"Revision": info["Revision"], "FilePath": name},
+                             headers=headers, stream=True, timeout=(10, 30)) as response:
+                if start and response.status_code == 416:
+                    continue
+                response.raise_for_status()
+                limit = size
+                if response.status_code == 206:
+                    span = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)",
+                                        response.headers.get("Content-Range", ""), re.IGNORECASE)
+                    if not span:
+                        raise OSError("模型续传范围不匹配")
+                    first, last, total = map(int, span.groups())
+                    if first != start or not first <= last < size or total != size:
+                        raise OSError("模型续传范围不匹配")
+                    limit = last + 1
+                elif response.status_code == 200:
+                    start = 0
+                else:
+                    raise OSError(f"模型下载响应状态异常：{response.status_code}")
+                if offset and not start:
+                    digest = hashlib.sha256()
+                    if bar:
+                        bar.n = 0
+                written = start
+                # 等到首个有效数据块再打开文件，避免空响应截断已有分片。
+                with ExitStack() as stack:
+                    file = None
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if check_cancel:
+                            check_cancel()
+                        if not chunk:
+                            continue
+                        written += len(chunk)
+                        if written > limit:
+                            raise OSError("模型下载响应超出声明的文件范围")
+                        if file is None:
+                            file = stack.enter_context(part.open("ab" if start else "wb", buffering=0))
                         file.write(chunk)
                         digest.update(chunk)
                         if bar:
                             bar.update(len(chunk))
-            if check_cancel:
-                check_cancel()
+                if check_cancel:
+                    check_cancel()
+                if written == start:
+                    raise OSError("模型下载响应没有数据")
+                break
         if part.stat().st_size != size or digest.hexdigest() != expected:
             raise OSError(f"模型文件 {name} 大小或 SHA256 校验失败")
-        part.replace(target)
+        replace_with_retry(part, target, before_retry=check_cancel)
     finally:
         if bar:
             bar.close()
@@ -300,7 +332,7 @@ def _download_modelscope(config, model: str, tqdm_class=None, on_status=None,
             raise OSError("国内模型文件不完整或 JSON 文件损坏")
         manifest = path / "download.json.part"
         manifest.write_text(json.dumps({f["Path"]: f["Size"] for f in files}), encoding="utf-8")
-        manifest.replace(path / "download.json")
+        replace_with_retry(manifest, path / "download.json", before_retry=check_cancel)
         return path
 
 

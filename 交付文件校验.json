@@ -1,5 +1,5 @@
 {
-  "version": "1.1.48.0",
+  "version": "1.1.49.0",
   "files": [
     {
       "path": ".gitattributes",
@@ -8,8 +8,8 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "71697531a7cf28cf9986d5c348ae018d99c0bcab20de09924d146f2c4da48cc3",
-      "size": 3344
+      "sha256": "de17bbcd966b65c46fb5a0857fc32db2f24eb99c9422b44fbf6b4e4dea9faec3",
+      "size": 3425
     },
     {
       "path": ".github/workflows/installer-pages.yml",
@@ -28,8 +28,8 @@
     },
     {
       "path": "Directory.Build.props",
-      "sha256": "c8d9c86c7406ebb9bcb1b4cb612db68b4d771845729a8b5b062750219fac6fa5",
-      "size": 179
+      "sha256": "8af39a2ab8c7f49e109a1b7cdcc6052e304d7684e4c643af5a621df1b42cb211",
+      "size": 184
     },
     {
       "path": "Jiying.sln",
@@ -73,8 +73,8 @@
     },
     {
       "path": "global.json",
-      "sha256": "ce61f5ae207d33d00594c77c5999c7f0dc66434e85a85f38090335d588438974",
-      "size": 109
+      "sha256": "6a8e9044030d136bd4c04fff9684111a3478b27559bfb6d19e4d380f0de91510",
+      "size": 116
     },
     {
       "path": "index.html",
@@ -113,8 +113,8 @@
     },
     {
       "path": "mistdown/native-shell/Jiying.Core/EngineClient.Connection.cs",
-      "sha256": "8f82e517fc51ed4919a73850407f2d496e292f3c977ab4962d1d9bc3ff787dfb",
-      "size": 15361
+      "sha256": "f12fb2e3cafb7829fcf055377429cca31ba1f5958c22ee90fe94a4e3d665dca1",
+      "size": 16043
     },
     {
       "path": "mistdown/native-shell/Jiying.Core/EngineClient.cs",
@@ -543,8 +543,8 @@
     },
     {
       "path": "packaging/msix/AppxManifest.xml",
-      "sha256": "cdfd8c8c261c6c1e2ba431445efc23756de865b2a2424d3405b244caef5691bc",
-      "size": 1492
+      "sha256": "8c268b9859306fc51d57469c51c060c2bdf6694e57524185c10950bd373019a5",
+      "size": 1515
     },
     {
       "path": "packaging/msix/Assets/Square150x150Logo.png",
@@ -568,48 +568,48 @@
     },
     {
       "path": "scripts/build-windows.ps1",
-      "sha256": "8bf771c1f10c0ff7c34315c6a09c393d86f2f48c2094ea145bd6435be3cc64e9",
-      "size": 4087
+      "sha256": "90e64720e87a0bbc1fd3b2c315184177f251ec3825fc438d16ae397b4ca65e78",
+      "size": 4167
     },
     {
       "path": "scripts/check-frozen-engine.py",
-      "sha256": "0863c27b2c80dee3194c337d6e42547737bf3cea606829a2e68557876f69a0be",
-      "size": 2986
+      "sha256": "18d3b0d1c3d00cb3fed98ebdc50b967b330afe12e8294cc7b7c0f94ee7675de6",
+      "size": 3054
     },
     {
       "path": "scripts/check-wheel-version.py",
-      "sha256": "b29071e9dcf5392debcd204b797f49e9f746a8c9d3aba958594e9654fd2fd860",
-      "size": 1043
+      "sha256": "de883bcec5f2d88ef9691aae57574fe91dd2d2e43aa38b7500cc754eddb91722",
+      "size": 1066
     },
     {
       "path": "scripts/clear-verified-versions.ps1",
-      "sha256": "c9d3eaf3ed798a760f24f433f72f0c65dc0eefacf4a2c62e1866a581a2403a95",
-      "size": 6485
+      "sha256": "6f7077e62648287cc97c85b70f32ee4ca8bea7a6c21ad9d3afa9cc52136a1342",
+      "size": 6610
     },
     {
       "path": "scripts/dotnet-sdk.ps1",
-      "sha256": "9aea12968a88f434d6ee57d67cb3c2c804dda7952eda4355ab00208b6cc1f898",
-      "size": 982
+      "sha256": "8332bb4d7f3c66c69645f3c68b69384808052ab7fa0c03bec2f789e4d6d83242",
+      "size": 1000
     },
     {
       "path": "scripts/prepare-ci-media.ps1",
-      "sha256": "8bdb156f0287b5bde0a0d0c62abb1ee4e8d66246f040a40a4cc476a3cb7362c0",
-      "size": 2236
+      "sha256": "6414d67367d728da57942b23baff0d2a2f210e2a1f0385490895b74ab7b7e4ff",
+      "size": 2275
     },
     {
       "path": "scripts/prepare-sqlite.py",
-      "sha256": "37aa4c71e275e81444185f16d2398565a20bdfb7e538b28bd627f46db47edde5",
-      "size": 1187
+      "sha256": "82d55482457871df212c9565f923a487817e5f75697ba415ca552319bd3ab16f",
+      "size": 1221
     },
     {
       "path": "scripts/test-backend.py",
-      "sha256": "6c2264a381666dd99e0b27d849b9f78d6bef34642a4676f0673449c42adc1eeb",
-      "size": 1372
+      "sha256": "830b9e52fc3070c0edc331698bf17f65b96071d35b4f4f649c8ee1567e95bdf3",
+      "size": 1409
     },
     {
       "path": "scripts/test.ps1",
-      "sha256": "b359d80aef8976d05005a348c3b1e2fd9798511d370d74728ac133daed98450f",
-      "size": 5060
+      "sha256": "e060d8fd5af45e7a9837283152eb6081445ce2a75e7ba0e352a670bf84df3e68",
+      "size": 5162
     },
     {
       "path": "third-party/Tabler-Icons-LICENSE.txt",
@@ -648,7 +648,7 @@
     },
     {
       "path": "video-subtitler/app/VERSION",
-      "sha256": "df9b1c5cb7246a3a5199db9fed27190859a7ba5247be16d88e1cd5eca1bc97bc",
+      "sha256": "151a7fdf6d2c74f549d68367b88998c116c9ee922ba00c4d974020064828344b",
       "size": 9
     },
     {
@@ -668,8 +668,8 @@
     },
     {
       "path": "video-subtitler/app/api/local_session.py",
-      "sha256": "73379e10cb93d67423c156b6f54e9fbc97aa4f8ca3fd2a493fabd5545598b6f6",
-      "size": 2629
+      "sha256": "932b6f4a8b170bb3d474ad440a50d3875c8e8c5543983b73b3207187a10cb8bb",
+      "size": 3242
     },
     {
       "path": "video-subtitler/app/api/media_routes.py",
@@ -718,8 +718,8 @@
     },
     {
       "path": "video-subtitler/app/core/config.py",
-      "sha256": "3177c8a7b137b0081750a248e6e22cdc27d43af7b5bd4d7fd899539d99f156cc",
-      "size": 12162
+      "sha256": "2442f17e299e7f76354514ef87f98e5ec21ad10931a124cf31a4a02613331498",
+      "size": 12177
     },
     {
       "path": "video-subtitler/app/core/errors.py",
@@ -738,8 +738,8 @@
     },
     {
       "path": "video-subtitler/app/core/paths.py",
-      "sha256": "5eca63cff65cc6cc0c8dfdc76daa55e16ca1d586639369949346f0fdec61eba3",
-      "size": 1981
+      "sha256": "f79aec3171607363b5965b34d8697f525a3b3770cfd98a27983bcd288357b574",
+      "size": 2786
     },
     {
       "path": "video-subtitler/app/core/windows_data.py",
@@ -768,8 +768,8 @@
     },
     {
       "path": "video-subtitler/app/pipeline/artifacts.py",
-      "sha256": "2b7ec61688af60a2c54b3a5ca9c645f3e7217f982a94ba72dd6bc2cfc74eeedc",
-      "size": 9660
+      "sha256": "aae7123b09c9c88c2a05ea46bd3613b337e5850230fda7b38d8440a91d6ce49c",
+      "size": 9880
     },
     {
       "path": "video-subtitler/app/pipeline/download.py",
@@ -853,8 +853,8 @@
     },
     {
       "path": "video-subtitler/app/services/downloader/native_ranges.py",
-      "sha256": "f4fb519685e8027ed1f4eaecb1c8e01828ddeab30e47908ce5229d46c30ef7ca",
-      "size": 8892
+      "sha256": "5df442bca564232e4abc614c138e255b99f4c9ec072177465cad55ecfba2b015",
+      "size": 9014
     },
     {
       "path": "video-subtitler/app/services/engines/__init__.py",
@@ -1003,8 +1003,8 @@
     },
     {
       "path": "video-subtitler/app/services/whisper_models.py",
-      "sha256": "02d796ce1d565b6b132aae3ae07702410ef16bcd48c5595cbaa45a4f13262a53",
-      "size": 17531
+      "sha256": "97d7157668c383d65fa8db37b888f42a3cef06df1d4d5e5f3d82baa9e4e743c3",
+      "size": 19330
     },
     {
       "path": "video-subtitler/app/services/ytdlp_updater.py",
@@ -1327,6 +1327,11 @@
       "size": 1111
     },
     {
+      "path": "video-subtitler/tests/test_file_reliability.py",
+      "sha256": "4961c2a5eb853739528e0058f4033dfc67afbb60265a02d9d905f4620c8f047f",
+      "size": 4097
+    },
+    {
       "path": "video-subtitler/tests/test_gpu_api.py",
       "sha256": "1b6f8fc993c746e1b1e0297cd6862faa8d899a70e51714bada3776e87eb6b5cb",
       "size": 2073
@@ -1523,8 +1528,8 @@
     },
     {
       "path": "video-subtitler/tests/test_whisper_domestic_source.py",
-      "sha256": "7a0a83edd9c2d784e4c6ad27548cdc7950d85e021fffa35911ede607583a3b9a",
-      "size": 5993
+      "sha256": "e3ddfad6cbae296675da4916a9cf56fad992e8e0037afc824f1d66d3987f367a",
+      "size": 10544
     },
     {
       "path": "video-subtitler/tests/test_whisper_download.py",
@@ -1540,6 +1545,11 @@
       "path": "video-subtitler/tests/test_windows_credentials.py",
       "sha256": "a802f6dba6d6907460324d0d509537820e9a5418bc4f46de7f6facf93139c8f1",
       "size": 2228
+    },
+    {
+      "path": "video-subtitler/tests/test_windows_session_cross_volume.py",
+      "sha256": "a4ba4925bc0087a4657457d18484082ccca051d9e92ff25b6b42bb75c7cd450a",
+      "size": 2715
     },
     {
       "path": "video-subtitler/tests/test_ytdlp_bundled_ffmpeg.py",
@@ -1573,8 +1583,8 @@
     },
     {
       "path": "交付说明.txt",
-      "sha256": "21d18eb98686336d0d809a2e5f99a86b7f3a0794d5b4e38000065fef5e2de68d",
-      "size": 801
+      "sha256": "8f44a3cec2e0c0888f16c0d70f538e2065edb26d372231466d72a9c7ee656931",
+      "size": 740
     },
     {
       "path": "开发说明.md",
@@ -1583,8 +1593,8 @@
     },
     {
       "path": "源码验证.md",
-      "sha256": "86156a04090ed1c575902e34049e0a61a967eaccf55c3539c09d42565b513205",
-      "size": 5463
+      "sha256": "4f4b35ed4907459d7492b3a7014c64400abfe31efe944a3cd23aec4465f00035",
+      "size": 5887
     },
     {
       "path": "第三方说明.md",

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -85,12 +86,15 @@ internal sealed partial class EngineClient
                 }
             }
 
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-            while (DateTime.UtcNow < deadline)
+            var startup = Stopwatch.StartNew();
+            while (startup.Elapsed < TimeSpan.FromSeconds(30))
             {
-                await Task.Delay(500, token);
+                // 登记文件可能早于端口监听，启动初期短探测，慢启动恢复常规节奏。
+                var early = startup.Elapsed < TimeSpan.FromSeconds(2);
+                await Task.Delay(early ? 50 : 500, token).ConfigureAwait(false);
                 session = EngineSession.Read(_enginePath);
-                found = session is not null && await PairedEngineReadyAsync(session.Port, session.Token, token)
+                found = session is not null && (!early || IsLoopbackListening(session.Port))
+                    && await PairedEngineReadyAsync(session.Port, session.Token, token)
                     ? session.Port : null;
                 token.ThrowIfCancellationRequested();
                 if (!TrySetPort(found, ref version, session?.Token)) return false;
@@ -133,6 +137,16 @@ internal sealed partial class EngineClient
         }
     }
 
+
+    private static bool IsLoopbackListening(int port)
+    {
+        try
+        {
+            return IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners()
+                .Any(endpoint => endpoint.Port == port && endpoint.Address.Equals(IPAddress.Loopback));
+        }
+        catch (NetworkInformationException) { return true; }
+    }
 
     private static async Task<bool> PairedEngineReadyAsync(int port, string credential, CancellationToken token)
     {

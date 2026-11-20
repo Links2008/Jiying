@@ -10,6 +10,7 @@ from yt_dlp.networking.exceptions import HTTPError, RequestError
 from yt_dlp.utils import DownloadError, parse_http_range
 
 from ...core import cancel
+from ...core.paths import replace_with_retry
 from ...core.errors import AppError, Codes
 
 CHUNK_BYTES = 10 * 1024 * 1024
@@ -30,7 +31,7 @@ def _prepare_resume(attempt: Path, size: int) -> None:
         with partial.open("r+b") as handle:
             handle.truncate(expected)
         return
-    except (OSError, ValueError, KeyError, TypeError):
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
         # 仅清理本次来源标识下的临时检查点，不读取或覆盖其他任务文件。
         partial.unlink(missing_ok=True)
         checkpoint.unlink(missing_ok=True)
@@ -176,7 +177,7 @@ def download_ranges(ydl, target, dest_dir: Path, on_progress=None, task_id=None,
     if not fd.download(str(attempt), info)[0] or attempt.stat().st_size != size:
         raise AppError(Codes.ENG_FAILED, "分段下载文件长度不一致")
     _check_stop(task_id, stop_event)
-    attempt.replace(output)
+    replace_with_retry(attempt, output, before_retry=lambda: _check_stop(task_id, stop_event))
     try:
         completed.write_text(json.dumps({"source": identity, "size": size,
                                          "mtime": output.stat().st_mtime_ns}), encoding="utf-8")
